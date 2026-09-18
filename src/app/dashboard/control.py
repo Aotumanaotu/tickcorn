@@ -15,6 +15,8 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import re
+from urllib.parse import urlsplit
 import threading
 import time
 from dataclasses import dataclass, field, asdict
@@ -23,6 +25,7 @@ from typing import Any, Optional
 
 from app.common.config import AppConfig
 from app.common.exceptions import AppError
+from app.common.private_files import write_private_json
 from app.common.logging import get_logger
 
 logger = get_logger("dashboard.control")
@@ -34,8 +37,10 @@ SETTINGS_FILENAME = "settings.local.json"
 class OperationalSettings:
     """Everything the web panel may edit."""
 
-    instruments: list[str] = field(default_factory=lambda: ["C2701"])
+    instruments: list[str] = field(default_factory=list)
     fronts: list[str] = field(default_factory=list)
+    broker_id: str = ""
+    source_kind: str = "simnow_test"
     user: str = ""
     password: str = ""               # only persisted when remember=True
     remember: bool = False           # persist credentials to disk (0600)
@@ -62,8 +67,10 @@ class SettingsStore:
             return OperationalSettings(
                 instruments=list(raw.get("instruments") or []),
                 fronts=list(raw.get("fronts") or []),
-                user=str(raw.get("user") or ""),
-                password=str(raw.get("password") or ""),
+                broker_id=str(raw.get("broker_id") or ""),
+                source_kind=str(raw.get("source_kind") or "simnow_test"),
+                user=str(raw.get("user") or "") if raw.get("remember") else "",
+                password=str(raw.get("password") or "") if raw.get("remember") else "",
                 remember=bool(raw.get("remember", False)),
                 note=str(raw.get("note") or ""),
             )
@@ -75,12 +82,10 @@ class SettingsStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = asdict(s)
         if not s.remember:
-            payload["password"] = ""   # never persist unless explicitly asked
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
-                       encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, self.path)
+            payload["user"] = ""
+            payload["password"] = ""
+        write_private_json(self.path, payload)
+
 
 
 class CollectorManager:
@@ -113,6 +118,7 @@ class CollectorManager:
         with self._lock:
             return {
                 "running": self.running,
+                "stopping": bool(self._thread and self._thread.is_alive() and not self.running),
                 "batch_id": self._service.batch_id if self._service else None,
                 "instruments": [i for i in self._service.instruments]
                 if self._service else [],
@@ -126,31 +132,61 @@ class CollectorManager:
 
     # ------------------------------------------------------------------
     def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Apply settings from the web form. Password left empty = keep."""
+        """Validate a copy before replacing settings; empty password = keep."""
         with self._lock:
-            s = self.settings
-            if payload.get("instruments"):
-                instruments = [str(x).strip().upper()
-                               for x in str(payload["instruments"]).replace(
-                                   ",", " ").split() if x.strip()]
-                if not instruments:
-                    raise AppError("合约列表为空")
-                s.instruments = instruments
-            if payload.get("fronts") is not None:
-                fronts = [ln.strip() for ln in str(payload["fronts"]).splitlines()
-                          if ln.strip() and not ln.strip().startswith("#")]
-                if fronts:
-                    s.fronts = fronts
-            if payload.get("user") is not None:
-                s.user = str(payload["user"]).strip()
-            if payload.get("password"):
-                s.password = str(payload["password"])
-            elif payload.get("clear_password"):
+            if self._thread and self._thread.is_alive():
+                raise AppError("请先停止采集，再修改配置")
+            s = dataclasses.replace(self.settings)
+            for key in ("user", "password", "broker_id", "source_kind", "note"):
+                if key in payload and not isinstance(payload[key], str):
+                    raise AppError("配置字段类型错误")
+            if "instruments" in payload:
+                if not isinstance(payload["instruments"], str):
+                    raise AppError("合约应为空格或逗号分隔的文本")
+                s.instruments = list(dict.fromkeys(payload["instruments"].replace(",", " ").upper().split()))
+                if len(s.instruments) > 50:
+                    raise AppError("一次最多订阅 50 个合约")
+                for inst in s.instruments:
+                    if not re.fullmatch(r"[A-Z]{1,8}[0-9]{3,4}", inst):
+                        raise AppError("合约格式无效")
+                    self.config.resolve_tick_size(inst)
+            if "fronts" in payload:
+                if not isinstance(payload["fronts"], str):
+                    raise AppError("前置地址应为文本")
+                fronts = list(dict.fromkeys(x.strip() for x in payload["fronts"].splitlines() if x.strip()))
+                if len(fronts) > 10:
+                    raise AppError("最多配置 10 个行情前置")
+                for front in fronts:
+                    try:
+                        u = urlsplit(front)
+                        valid = (u.scheme == "tcp" and u.hostname and u.port and
+                                 not u.username and not u.password and not u.path and
+                                 not u.query and not u.fragment and not any(c.isspace() for c in front))
+                    except ValueError:
+                        valid = False
+                    if not valid:
+                        raise AppError("前置地址格式应为 tcp://主机:端口，不包含账号或参数")
+                s.fronts = fronts
+            for key in ("user", "broker_id", "source_kind", "note"):
+                if key in payload:
+                    setattr(s, key, payload[key].strip())
+            if payload.get("clear_password"):
                 s.password = ""
-            s.remember = bool(payload.get("remember", s.remember))
-            if payload.get("note") is not None:
-                s.note = str(payload["note"])[:200]
+            elif payload.get("password"):
+                s.password = payload["password"]
+            for key, limit in (("user", 15), ("password", 40), ("broker_id", 10)):
+                value = getattr(s, key)
+                if len(value.encode("utf-8")) > limit or any(ord(c) < 32 for c in value):
+                    raise AppError("账号、密码或 BrokerID 超出 CTP 字段长度或包含控制字符")
+            if s.source_kind not in ("simnow_test", "simnow_standard"):
+                raise AppError("请选择 SimNow 测试或标准环境")
+            if "remember" in payload:
+                if not isinstance(payload["remember"], bool):
+                    raise AppError("记住账号密码应为布尔值")
+                s.remember = payload["remember"]
+            s.note = s.note[:200]
             self.settings_store.save(s)
+            self.settings = s
             return s.masked()
 
     # ------------------------------------------------------------------
@@ -169,6 +205,8 @@ class CollectorManager:
                 missing.append("SimNow 账号/密码")
             if not s.fronts:
                 missing.append("前置地址")
+            if not s.broker_id:
+                missing.append("BrokerID")
             if missing:
                 raise AppError("缺少: " + "、".join(missing))
 
@@ -178,6 +216,7 @@ class CollectorManager:
                 instruments=s.instruments,
                 user=s.user,
                 password=s.password,
+                raw_source="ctp:" + s.source_kind,
                 with_dashboard=False,   # dashboard already running (serve)
                 note=s.note or "started from web panel",
             )
@@ -189,9 +228,9 @@ class CollectorManager:
                 try:
                     service.run()
                 except Exception as e:      # noqa: BLE001 - report to panel
-                    logger.exception("collector thread crashed")
+                    logger.error("collector thread failed (%s)", type(e).__name__)
                     with self._lock:
-                        self._error = f"{type(e).__name__}: {e}"
+                        self._error = "采集失败，请检查配置、磁盘空间和服务日志（" + type(e).__name__ + "）"
 
             self._thread = threading.Thread(target=_run, name="collector",
                                             daemon=True)
@@ -205,7 +244,9 @@ class CollectorManager:
         if service is not None:
             service.stop()
         if thread is not None:
-            thread.join(timeout=60)
+            thread.join(timeout=90)
+            if thread.is_alive():
+                raise AppError("采集仍在停止并保存数据，请稍后查看状态")
         return self.status()
 
     # ------------------------------------------------------------------
@@ -215,5 +256,5 @@ class CollectorManager:
         if not s.fronts:
             return self.config
         new_ctp = dataclasses.replace(self.config.ctp,
-                                      fronts=tuple(s.fronts))
+                                      fronts=tuple(s.fronts), broker_id=s.broker_id)
         return dataclasses.replace(self.config, ctp=new_ctp)

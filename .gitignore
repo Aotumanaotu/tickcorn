@@ -13,8 +13,9 @@ dist/
 # Original SDK archives (runtime headers and libraries live in third_party/)
 *.zip
 
-# CTP shim build artifacts are tracked intentionally (native/*.so needed at
-# runtime); md_shim.cpp is source. Keep both.
+# Proprietary SDK is supplied locally under its own terms; build artifacts are local.
+third_party/ctp/
+src/app/collector/native/*.so
 
 # data (research artifacts, never commit)
 data/
@@ -27,3 +28,20 @@ data/
 *.local.yaml
 settings.local.json
 nohup.out
+
+# Deployment overrides and private key material
+compose.override.yaml
+compose.override.yml
+docker-compose.override.yml
+deploy/*.local.*
+*.pem
+*.key
+*.local.json
+
+# Generated demo reports are runtime artifacts, not source.
+samples/synthetic_demo/*
+!samples/synthetic_demo/README.txt
+
+# Local browser verification artifacts
+.playwright-cli/
+output/

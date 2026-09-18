@@ -8,13 +8,15 @@ Modes:
       data/settings.local.json, 0600, gitignored).
     * standalone-- `app dashboard`: tails the live JSONL feed file.
 
-Optional access token (recommended for cloud deployments): all requests
-must then carry ?token=... or the X-Auth-Token header.
+Protected API requests carry the X-Auth-Token header. Only the static login
+shell and minimal health endpoint are public; query-string tokens are rejected.
 """
 
 from __future__ import annotations
 
 import json
+import secrets
+from urllib.parse import urlsplit
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -54,14 +56,20 @@ class DashboardServer:
                 token = outer.auth_token
                 if not token:
                     return True
-                supplied = None
-                if self.path.startswith("/"):
-                    from urllib.parse import urlparse, parse_qs
-                    q = parse_qs(urlparse(self.path).query)
-                    supplied = (q.get("token") or [None])[0]
-                if not supplied:
-                    supplied = self.headers.get("X-Auth-Token")
-                return supplied == token
+                supplied = self.headers.get("X-Auth-Token", "")
+                return secrets.compare_digest(supplied.encode(), token.encode())
+
+            def end_headers(self):
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("X-Frame-Options", "DENY")
+                self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
+                super().end_headers()
+
+            def setup(self):
+                super().setup()
+                self.connection.settimeout(10)
 
             def _deny(self):
                 self.send_response(401)
@@ -85,12 +93,19 @@ class DashboardServer:
                     return {}          # empty body (e.g. start/stop buttons)
                 if length > 1 << 20:
                     raise AppError("invalid request body")
-                return json.loads(self.rfile.read(length).decode("utf-8"))
+                if self.headers.get_content_type() != "application/json":
+                    raise AppError("request must use application/json")
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+                if not isinstance(body, dict):
+                    raise AppError("request body must be an object")
+                return body
 
             # ---------------- routing ----------------
             def do_GET(self):  # noqa: N802
                 path = self.path.split("?")[0]
-                if not self._authorized():
+                if path == "/healthz":
+                    return self._json({"status": "ok"})
+                if path not in ("/", "/index.html") and not self._authorized():
                     return self._deny()
                 if path == "/api/state":
                     outer._tail_once()
@@ -117,6 +132,11 @@ class DashboardServer:
                 path = self.path.split("?")[0]
                 if not self._authorized():
                     return self._deny()
+                origin = self.headers.get("Origin")
+                if origin and urlsplit(origin).netloc != self.headers.get("Host"):
+                    return self._json({"error": "cross-origin request rejected"}, 403)
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    return self._json({"error": "cross-site request rejected"}, 403)
                 if outer.manager is None:
                     return self._json({"error": "control API not enabled "
                                        "(use `python -m app serve`)"}, 400)
@@ -129,12 +149,14 @@ class DashboardServer:
                     if path == "/api/collect/stop":
                         return self._json(outer.manager.stop())
                     return self._json({"error": "unknown endpoint"}, 404)
+                except (ValueError, UnicodeError):
+                    return self._json({"error": "invalid request body"}, 400)
                 except AppError as e:
                     return self._json({"error": str(e)}, 400)
                 except Exception as e:  # noqa: BLE001
-                    logger.exception("control API error")  # body NOT logged
+                    logger.error("control API failed (%s)", type(e).__name__)
                     return self._json(
-                        {"error": f"{type(e).__name__}: {e}"}, 500)
+                        {"error": "服务器操作失败，请检查磁盘和服务状态"}, 500)
 
         self._handler = Handler
         self._static_dir = _STATIC_DIR

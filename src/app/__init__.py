@@ -10,6 +10,6 @@ Terminology (IMPORTANT for the associated paper):
       GENUINE_QUOTE_MOVE and AMBIGUOUS.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 APP_NAME = "corn-tick-microstructure"

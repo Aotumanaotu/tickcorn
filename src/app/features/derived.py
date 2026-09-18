@@ -108,5 +108,5 @@ def add_ts_and_minute(df: pd.DataFrame) -> pd.DataFrame:
                                   df.get("update_millisec", 0))
         ]
     ts = df["exchange_ts_ns"]
-    df["minute_of_day"] = ((ts // 60_000_000_000) % 1440).astype(int)
+    df["minute_of_day"] = ((ts // 60_000_000_000 + 8 * 60) % 1440).astype(int)
     return df

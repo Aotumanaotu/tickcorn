@@ -53,7 +53,7 @@ def test_end_to_end_analysis(e2e_env):
     assert s["ambiguous"] == 2                    # ep index 5
     assert s["one_tick_last_changes"] == 62       # 6/episode + 2 ambiguous
     assert s["bounce_ratio"] == pytest.approx(50 / 62, abs=1e-9)
-    assert s["genuine_move_ratio"] == pytest.approx(20 / 62, abs=1e-9)
+    assert s["genuine_move_ratio"] == pytest.approx(10 / 62, abs=1e-9)
 
     # ---- outputs exist ----
     out = result.output_dir

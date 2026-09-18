@@ -40,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="SimNow user (default: env SIMNOW_USER)")
     c.add_argument("--password", default=None,
                    help="SimNow password (default: env SIMNOW_PASSWORD)")
+    c.add_argument("--broker-id", default=None, help="authorized provider BrokerID")
     c.add_argument("--front", action="append", default=None,
                    help="override market front address (repeatable)")
     c.add_argument("--dashboard", dest="dashboard",
@@ -141,6 +142,8 @@ def cmd_collect(args) -> int:
     config = _load_config(args)
     if args.front:
         object.__setattr__(config.ctp, "fronts", tuple(args.front))
+    if args.broker_id:
+        object.__setattr__(config.ctp, "broker_id", args.broker_id)
 
     user = args.user or os.environ.get(config.ctp.user_env)
     password = args.password or os.environ.get(config.ctp.password_env)
@@ -169,6 +172,13 @@ def cmd_collect(args) -> int:
 
 
 def cmd_finalize(args) -> int:
+    from app.common.private_files import ProcessLock
+    config = _load_config(args)
+    with ProcessLock(config.paths.data_dir / "collector.lock"):
+        return _cmd_finalize(args)
+
+
+def _cmd_finalize(args) -> int:
     from app.storage.metadata_db import MetadataDB
     from app.storage.parquet_store import RawParquetStore
     config = _load_config(args)
@@ -297,7 +307,7 @@ def cmd_analyze(args) -> int:
         horizons=tuple(config.analysis.horizons),
         tick_size=args.tick_size,
     )
-    result = run_analysis(config, args.instrument, days, options)
+    result = run_analysis(config, args.instrument, days, options, output_dir=args.output)
     out = result.output_dir
     print(f"analysis written to {out}")
     print("  summary.html / summary.md / *.csv / figures/")
@@ -335,35 +345,41 @@ def cmd_serve(args) -> int:
     config = _load_config(args)
     manager = CollectorManager(config)
 
-    token = args.token or os.environ.get("DASHBOARD_TOKEN")
+    from app.common.private_files import dashboard_token, ProcessLock
+    import signal
+    os.umask(0o077)
     host = args.host or config.dashboard.host
     port = args.port or config.dashboard.port
-
-    if args.no_token:
-        token = None
-    if not token and host not in ("127.0.0.1", "localhost", "::1"):
-        print("=" * 64, file=sys.stderr)
-        print("警告: 面板将绑定到非本机地址且未设置访问令牌!", file=sys.stderr)
-        print("任何能访问该端口的人都可以看到/修改你的采集配置。", file=sys.stderr)
-        print("建议: --token <随机串> 或环境变量 DASHBOARD_TOKEN,", file=sys.stderr)
-        print("并在云安全组里仅放行你自己的 IP。", file=sys.stderr)
-        print("=" * 64, file=sys.stderr)
-
-    state = LiveState(history_points=config.dashboard.history_points)
-    dash = DashboardServer(state, host=host, port=port,
-                           refresh_ms=config.dashboard.refresh_ms,
-                           manager=manager, auth_token=token)
-    scheme = "http"
-    print(f"控制面板: {scheme}://{host}:{port}/"
-          + (f"?token={token}" if token and len(token) < 64 else ""))
-    print("网页内可配置: 合约 / SimNow 账号(仅存本机, 0600) / 前置地址, "
-          "并可一键启停采集。Ctrl+C 退出。")
+    if args.no_token and host not in ("127.0.0.1", "localhost", "::1"):
+        raise AppError("无令牌模式仅允许绑定本机回环地址")
+    lock = ProcessLock(config.paths.data_dir / "serve.lock")
+    dash = None
+    old_handlers = {}
     try:
+        token = None if args.no_token else (args.token or os.environ.get("DASHBOARD_TOKEN")
+                                            or dashboard_token(config.paths.data_dir))
+        state = LiveState(history_points=config.dashboard.history_points)
+        dash = DashboardServer(state, host=host, port=port,
+                               refresh_ms=config.dashboard.refresh_ms,
+                               manager=manager, auth_token=token)
+        def stop_server(signum, frame):
+            dash.shutdown()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            old_handlers[sig] = signal.signal(sig, stop_server)
+        print(f"控制面板: http://{host}:{port}/", flush=True)
+        print("请通过 SSH 隧道访问。在网页输入面板令牌和采集配置。", flush=True)
+        if token:
+            print("面板令牌保存在运行时数据目录，日志不显示令牌。", flush=True)
         dash.serve_forever()
-    except KeyboardInterrupt:
-        if manager.running:
-            print("采集仍在运行，正在停止...")
+    finally:
+        if dash:
+            dash.shutdown()
+        try:
             manager.stop()
+        finally:
+            for sig, handler in old_handlers.items():
+                signal.signal(sig, handler)
+            lock.close()
     return 0
 
 
@@ -385,7 +401,7 @@ def cmd_info(args) -> int:
     print("\n=== recent batches ===")
     for r in db.list_batches(10):
         print(f"  {r['batch_id']} {r['started_at']} status={r['status']} "
-              f"user={r['user_masked']}")
+              f"")
     print("\n=== recent analysis runs ===")
     for r in db.list_analysis_runs(10):
         print(f"  {r['run_id']} {r['instrument_id']} {r['trading_days']} "
@@ -481,7 +497,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     except AppError as e:
         logger.error("%s", e)
         return 2
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
         logger.error("%s", e)
         return 2
     except KeyboardInterrupt:

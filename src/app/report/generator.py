@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import json
+import html
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -24,6 +25,7 @@ import numpy as np
 import pandas as pd
 
 from app import __version__
+from app.features.derived import add_deltas
 from app.classifier.jump_classifier import JumpEventClassifier
 from app.common.config import AppConfig
 from app.common.constants import STATE5_ORDER, STATE8_ORDER
@@ -77,10 +79,17 @@ class AnalysisResult:
 
 # ---------------------------------------------------------------------
 
-def run_analysis(config: AppConfig, instrument_id: str, days: list[str],
+def run_analysis(config, instrument_id, days, options=None, db=None, repo=None, output_dir=None):
+    from app.common.private_files import ProcessLock
+    with ProcessLock(config.paths.data_dir / "collector.lock"):
+        return _run_analysis(config, instrument_id, days, options, db, repo, output_dir)
+
+
+def _run_analysis(config: AppConfig, instrument_id: str, days: list[str],
                  options: Optional[AnalysisOptions] = None,
                  db: Optional[MetadataDB] = None,
-                 repo: Optional[StorageRepository] = None) -> AnalysisResult:
+                 repo: Optional[StorageRepository] = None,
+                 output_dir: Optional[Path] = None) -> AnalysisResult:
     options = options or AnalysisOptions()
     db = db or MetadataDB(config.paths.metadata_db)
     repo = repo or StorageRepository(config, db=db)
@@ -105,19 +114,30 @@ def run_analysis(config: AppConfig, instrument_id: str, days: list[str],
             f"Run `python -m app collect --instrument {instrument_id}` first.")
     days = [k.trading_day for k in existing]
 
+    if any(any(repo.store.staging_dir(k).glob("part-*.parquet")) for k in existing):
+        raise ValueError("请先停止采集或执行 finalize，再分析已归档的数据")
     clean = repo.load_clean_range(instrument_id, days, tick_size=tick_size)
     df = clean.df
     logger.info("loaded %d clean snapshots for %s %s (dup=%d invalid=%d)",
                 len(df), instrument_id, days, clean.dropped_duplicates,
                 clean.dropped_invalid)
 
-    # ---------------- 2. classification ----------------------------------
-    labels = clf.classify_dataframe(df)
-    df = pd.concat([df, labels], axis=1)
+    if df.empty:
+        raise ValueError("清洗后没有有效行情，无法生成报告")
+    # Never infer an event across different days, collection batches or long gaps.
+    boundary = df["exchange_ts_ns"].diff().gt(60_000_000_000)
+    for col in ("trading_day", "batch_id", "trading_session", "instrument_id"):
+        if col in df:
+            boundary |= df[col].ne(df[col].shift())
+    df["segment_id"] = boundary.cumsum()
+    segments = []
+    for _, segment in df.groupby("segment_id", sort=False):
+        segment = segment.reset_index(drop=True)
+        segment = add_deltas(segment)
+        segment = pd.concat([segment, clf.classify_dataframe(segment)], axis=1)
+        segments.append(add_window_features(segment, list(options.lookbacks), tick_size))
+    df = pd.concat(segments, ignore_index=True)
     df = add_intraday_bucket(df, config)
-
-    # ---------------- 3. window features (for pre-event) ------------------
-    df = add_window_features(df, list(options.lookbacks), tick_size)
 
     # ---------------- 4. event statistics ---------------------------------
     stats_day = event_statistics(df, instrument_id, ",".join(days), config,
@@ -143,8 +163,10 @@ def run_analysis(config: AppConfig, instrument_id: str, days: list[str],
 
     # ---------------- 7. outputs -------------------------------------------
     day_label = days[0] if len(days) == 1 else f"{days[0]}..{days[-1]}"
-    out_dir = (config.paths.reports_dir
+    out_dir = Path(output_dir) if output_dir else (config.paths.reports_dir
                / f"{instrument_id}_{day_label}_{run_id}")
+    if out_dir.exists() and any(out_dir.iterdir()):
+        raise ValueError("输出目录非空，请选择新目录")
     fig_dir = out_dir / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
 
@@ -174,6 +196,7 @@ def run_analysis(config: AppConfig, instrument_id: str, days: list[str],
                              stats_day, comp, headline_pre, t5, obi_tables,
                              clean.stats, binned)
 
+    summary["raw_sources"] = sorted(str(x) for x in df["raw_source"].dropna().unique())
     (out_dir / "summary.md").write_text(
         _render_markdown(config, summary, stats_session, t5, obi_tables, comp),
         encoding="utf-8")
@@ -186,6 +209,7 @@ def run_analysis(config: AppConfig, instrument_id: str, days: list[str],
             "run_id": run_id, "app_version": __version__,
             "config_hash": config.config_hash,
             "instrument": instrument_id, "trading_days": days,
+            "raw_sources": summary["raw_sources"],
             "tick_size": tick_size,
             "classifier": clf.__dict__ | options.to_dict(),
             "input_hashes": repo.input_hashes(existing),
@@ -258,6 +282,9 @@ def _build_summary(config, instrument_id, days, tick_size, options, stats_day,
         "likely_bounce": int(likely),
         "genuine_moves": int(genuine),
         "ambiguous": int(amb),
+        "one_tick_bounce": int(row.get("one_tick_bounce_count", 0)),
+        "one_tick_genuine": int(row.get("one_tick_genuine_count", 0)),
+        "one_tick_ambiguous": int(row.get("one_tick_ambiguous_count", 0)),
         "bounce_ratio": row.get("bounce_ratio", float("nan")),
         "genuine_move_ratio": row.get("genuine_move_ratio", float("nan")),
         "ambiguous_ratio": row.get("ambiguous_ratio", float("nan")),
@@ -286,9 +313,7 @@ def _answer_questions_md(s: dict) -> str:
         f"在 {s['instrument']} 的 {', '.join(s['days'])} 交易日中，共观察到 "
         f"**{s['one_tick_last_changes']:,}** 次 1-Tick LastPrice 跳动。其中 "
         f"**{_fmt(s['bounce_ratio'], pct=True)}** 属于 Bid-Ask Bounce"
-        f"（未伴随 Best Bid/Ask 真实移动；其中 HIGH_CONFIDENCE_BOUNCE "
-        f"{s['high_confidence_bounce']:,} 次 + LIKELY_BOUNCE "
-        f"{s['likely_bounce']:,} 次），"
+        f"（HIGH_CONFIDENCE_BOUNCE + LIKELY_BOUNCE；仅统计 1-Tick 变化子集，共 {s['one_tick_bounce']:,} 次），"
         f"{_fmt(s['genuine_move_ratio'], pct=True)} 为 Genuine Quote Move（真实报价移动），"
         f"{_fmt(s['ambiguous_ratio'], pct=True)} 无法确定（AMBIGUOUS，保守分类）。"
     )
@@ -315,8 +340,8 @@ def _answer_questions_md(s: dict) -> str:
         "Predictability)。经济价值 (Economic Profitability) 需要第三阶段的 "
         "ExecutionSimulator（含手续费、滑点、延迟、成交概率），并做敏感性分析后才能回答。"
         f"参考：OBI 条件概率表中最强的方向优势为 |P(UP)-P(DOWN)| = "
-        f"{_fmt(s.get('best_obi_edge'))}；对 1-tick 价差品种，该优势必须显著超过"
-        "往返交易成本（价差+手续费+滑点）才可能具备经济价值。"
+        f"{_fmt(s.get('best_obi_edge'))}。该概率差不能直接与货币交易成本比较，"
+        "需要结合成交机制、价格变化幅度和手续费评估预期净收益。"
     )
     return q1, q2, q3
 
@@ -331,6 +356,8 @@ def _render_markdown(config, s, stats_session, t5, obi_tables, comp) -> str:
         f"{'严格 (strict)' if s['strict'] else '宽松 (loose)'}",
         f"- 快照总数: {s['total_snapshots']:,}（清洗后；重复 {s['clean_stats'].get('dropped_duplicates', 0):,}，"
         f"无效 {s['clean_stats'].get('dropped_invalid', 0):,}）",
+        "",
+        f"数据来源（用户配置）：{', '.join(s.get('raw_sources', []))}。测试或合成数据仅供联调。",
         "",
         "## 三个核心问题",
         "",
@@ -452,6 +479,7 @@ def _render_html(config, s, figures, stats_session, stats_bucket, t5,
  快照 {s['total_snapshots']:,} · 术语: CTP Market Snapshot（非逐笔订单流）</div>
 </header>
 <main>
+<p>数据来源（用户配置）：{html.escape(", ".join(s.get("raw_sources", [])))}。测试或合成数据仅供联调。</p>
  <div class="cards">{cards}</div>
 
  <section>

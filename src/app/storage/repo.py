@@ -72,14 +72,8 @@ class StorageRepository:
         return self.store.list_partitions(instrument_id)
 
     def input_hashes(self, keys: list[PartitionKey]) -> list[str]:
-        out = []
-        for key in keys:
-            final = self.store.final_path(key)
-            if final.exists():
-                out.append(sha256_of_file(final)[:16])
-            else:
-                out.append("staging:" + key.instrument_id + ":" + key.trading_day)
-        return out
+        return [sha256_of_file(path) for key in keys
+                for path in self.store.partition_files(key)]
 
     # ------------------------------------------------------------------
     # Clean layer
@@ -93,10 +87,10 @@ class StorageRepository:
 
         cache_dir = (self.config.paths.processed_dir
                      / f"instrument={instrument_id}" / f"trading_day={trading_day}")
-        raw_final = self.store.final_path(key)
-        raw_sig = (sha256_of_file(raw_final)[:16] if raw_final.exists()
-                   else f"staging-{key}")
-        param_sig = f"v1-tick{tick}"
+        raw_sig = hashlib.sha256("".join(self.input_hashes([key])).encode()).hexdigest()[:16]
+        if any(self.store.staging_dir(key).glob("part-*.parquet")):
+            use_cache = False
+        param_sig = f"v2-tick{tick}"
         cache_path = cache_dir / f"clean-{raw_sig}-{param_sig}.parquet"
         stats_path = cache_dir / f"clean-{raw_sig}-{param_sig}.json"
 
@@ -144,7 +138,9 @@ def build_clean_dataframe(df: pd.DataFrame, tick_size: float) -> CleanResult:
     # 1) exact duplicates: identical CTP field content on consecutive rows.
     value_cols = [c for c in CTP_VALUE_COLUMNS if c in df.columns]
     if len(df) > 1:
-        dup = df[value_cols].eq(df[value_cols].shift()).all(axis=1)
+        values = df[value_cols]
+        previous = values.shift()
+        dup = (values.eq(previous) | (values.isna() & previous.isna())).all(axis=1)
         dup.iloc[0] = False
     else:
         dup = pd.Series(False, index=df.index)

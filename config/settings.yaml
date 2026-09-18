@@ -10,20 +10,9 @@ paths:
   # raw/ processed/ features/ reports/ models/ live/ ctp_flow/ 自动创建于 data_dir 下
 
 ctp:
-  # SimNow 行情前置地址。若失效请到 simnow.com.cn 获取最新地址。
-  # 【7x24 环境】官方公告 2025-07-16 起开放（仅 CTP API 测试用）:
-  #   Market Front: 182.254.243.31:40011 (Trade: :40001)
-  #   服务时间: 交易日 16:00~次日09:00; 非交易日 16:00~次日12:00
-  #   注意: 新注册账号需等到第 3 个交易日才能使用该环境;
-  #         7x24 数据为模拟撮合, 论文统计应使用标准环境真实行情。
-  # 【标准/仿真环境】仅交易时段有行情(以下历史地址可能已轮换,
-  #   以 simnow.com.cn 登录后"产品与服务"页面公布的为准):
-  fronts:
-    - "tcp://182.254.243.31:40011"     # 7x24 环境 (API 联调/采集链路测试)
-    - "tcp://180.168.146.187:10131"    # 标准环境(历史地址,待核实)
-    - "tcp://180.168.146.187:10112"
-    - "tcp://218.202.237.33:10212"
-  broker_id: "9999"          # SimNow 模拟经纪商代码
+  # 部署后在网页填写当前官方行情前置和 BrokerID。
+  fronts: []
+  broker_id: ""
   user_env: "SIMNOW_USER"    # 存放用户名的环境变量名（凭据不要写进文件！）
   password_env: "SIMNOW_PASSWORD"  # 存放密码的环境变量名
   use_udp: false

@@ -33,6 +33,9 @@ STAT_COLUMNS = [
     "likely_bounce_count",
     "ambiguous_count",
     "no_move_count",
+    "one_tick_bounce_count",
+    "one_tick_genuine_count",
+    "one_tick_ambiguous_count",
     "bounce_ratio",
     "genuine_move_ratio",
     "ambiguous_ratio",
@@ -76,6 +79,10 @@ def _count_block(sub: pd.DataFrame) -> dict:
     ambiguous = int((lab == "AMBIGUOUS").sum())
     no_move = int((lab == "NO_MOVE").sum())
 
+    unit = (dl.abs() - 1.0).abs().le(1e-9)
+    unit_bounce = int((unit & fam.isin(["HIGH_CONFIDENCE_BOUNCE", "LIKELY_BOUNCE"])).sum())
+    unit_genuine = int((unit & lab.isin(["GENUINE_QUOTE_MOVE_UP", "GENUINE_QUOTE_MOVE_DOWN"])).sum())
+    unit_ambiguous = int((unit & (lab == "AMBIGUOUS")).sum())
     bounce_events = high_b + likely_b
     denom = one_tick if one_tick > 0 else np.nan
     ts_span_min = np.nan
@@ -96,9 +103,12 @@ def _count_block(sub: pd.DataFrame) -> dict:
         "likely_bounce_count": likely_b,
         "ambiguous_count": ambiguous,
         "no_move_count": no_move,
-        "bounce_ratio": bounce_events / denom if one_tick else np.nan,
-        "genuine_move_ratio": (genuine_up + genuine_down) / denom if one_tick else np.nan,
-        "ambiguous_ratio": ambiguous / denom if one_tick else np.nan,
+        "one_tick_bounce_count": unit_bounce,
+        "one_tick_genuine_count": unit_genuine,
+        "one_tick_ambiguous_count": unit_ambiguous,
+        "bounce_ratio": unit_bounce / denom if one_tick else np.nan,
+        "genuine_move_ratio": unit_genuine / denom if one_tick else np.nan,
+        "ambiguous_ratio": unit_ambiguous / denom if one_tick else np.nan,
         "high_bounce_share": high_b / bounce_events if bounce_events else np.nan,
         "mean_spread_ticks": (sub["spread_ticks"].mean()
                               if "spread_ticks" in sub else np.nan),

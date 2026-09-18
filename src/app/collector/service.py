@@ -66,7 +66,8 @@ class CollectorService:
         if not instruments:
             raise CollectorError("no instruments to collect")
         self.config = config
-        self.instruments = list(instruments)
+        self.instruments = list(dict.fromkeys(i.upper() for i in instruments))
+        instruments = self.instruments
         self.user = user
         self.password = password
         self.raw_source = raw_source
@@ -93,6 +94,8 @@ class CollectorService:
         self._queue: queue.Queue = queue.Queue(maxsize=200_000)
         self._stop = threading.Event()
         self._writer_started = threading.Event()
+        self._writer_error = None
+        self._writer_done = threading.Event()
         self._part_counters: dict[PartitionKey, int] = {}
         self._live_feed_file = None
         self._live_feed_path: Optional[Path] = None
@@ -113,99 +116,86 @@ class CollectorService:
     # ------------------------------------------------------------------
     def run(self) -> None:
         """Blocking collection loop (Ctrl+C or SIGTERM to stop)."""
-        self._prepare()
-
-        client = CtpMdClient(
-            handler=self,
-            flow_dir=self.config.paths.ctp_flow_dir,
-            use_udp=self.config.ctp.use_udp,
-            use_multicast=self.config.ctp.use_multicast,
-            production_mode=self.config.ctp.production_mode,
-        )
-        self._client_ref = client
-        self.live.api_version = client.api_version
-        for front in self.config.ctp.fronts:
-            client.register_front(front)
-
-        writer_thread = threading.Thread(target=self._writer_loop, name="writer",
-                                         daemon=True)
-        writer_thread.start()
-        self._writer_started.wait(5)
-
-        if self._with_dashboard:
-            self._start_dashboard()
-
-        self.db.create_batch(
-            batch_id=self.batch_id,
-            fronts=self.config.ctp.fronts,
-            broker_id=self.config.ctp.broker_id,
-            user_masked=_mask_user(self.user),
-            app_version=__version__,
-            api_version=client.api_version,
-            config_hash=self.config.config_hash,
-            note=self.note,
-        )
-        for inst in self.instruments:
-            self.db.upsert_instrument(
-                inst,
-                product=_product_of(inst),
-                exchange=self.config.exchange_of(inst),
-                tick_size=self.config.resolve_tick_size(inst))
-
-        client.init()
-        self.live.set_connection("waiting_front", "connecting to front...")
-
-        stop_signals = {"sig": None}
-
-        def _sig_handler(signum, _frame):
-            stop_signals["sig"] = signum
-            self.stop()
-
-        # signal handlers can only be installed in the main thread; when the
-        # service is started from the web control panel it runs in a worker
-        # thread and is stopped via CollectorService.stop() instead.
-        if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGINT, _sig_handler)
-            signal.signal(signal.SIGTERM, _sig_handler)
-
-        logger.info("collecting %s (batch %s); Ctrl+C to stop",
-                    self.instruments, self.batch_id)
-        if self._with_dashboard:
-            logger.info("dashboard: http://%s:%d",
-                        self.config.dashboard.host,
-                        self._dashboard_port or self.config.dashboard.port)
-
-        front_wait_since = time.monotonic()
-        warned = False
+        from app.common.private_files import ProcessLock
+        os.umask(0o077)
+        lock = ProcessLock(self.config.paths.data_dir / "collector.lock")
+        client = None
+        writer_thread = None
+        batch_created = False
+        old_handlers = {}
+        failure = None
         try:
-            while not self._stop.is_set():
-                time.sleep(0.5)
-                if (not warned and self.live.connection_status == "waiting_front"
-                        and time.monotonic() - front_wait_since > 30):
-                    warned = True
-                    logger.warning(
-                        "no front connection after 30s. Check: (1) SimNow front "
-                        "addresses in config/settings.yaml (fetch current ones "
-                        "from simnow.com.cn after login), (2) outbound TCP "
-                        "access to those host:ports, (3) SimNow service hours "
-                        "(standard env serves data only during trading hours).")
+            self._prepare()
+            if not self.config.ctp.fronts or not self.config.ctp.broker_id:
+                raise CollectorError("请先填写行情前置地址和 BrokerID")
+            client = CtpMdClient(
+                handler=self, flow_dir=self.config.paths.ctp_flow_dir,
+                use_udp=self.config.ctp.use_udp,
+                use_multicast=self.config.ctp.use_multicast,
+                production_mode=self.config.ctp.production_mode)
+            self._client_ref = client
+            self.live.api_version = client.api_version
+            for front in self.config.ctp.fronts:
+                client.register_front(front)
+            self.db.create_batch(
+                batch_id=self.batch_id, fronts=self.config.ctp.fronts,
+                broker_id=self.config.ctp.broker_id, user_masked="",
+                app_version=__version__, api_version=client.api_version,
+                config_hash=self.config.config_hash, note=self.raw_source)
+            batch_created = True
+            for inst in self.instruments:
+                self.db.upsert_instrument(inst, product=_product_of(inst),
+                    exchange=self.config.exchange_of(inst),
+                    tick_size=self.config.resolve_tick_size(inst))
+            writer_thread = threading.Thread(target=self._writer_loop, name="writer", daemon=True)
+            writer_thread.start()
+            if self._with_dashboard:
+                self._start_dashboard()
+            if threading.current_thread() is threading.main_thread():
+                for sig in (signal.SIGINT, signal.SIGTERM):
+                    old_handlers[sig] = signal.signal(sig, lambda *_: self.stop())
+            self.live.set_connection("waiting_front", "connecting to front")
+            client.init()
+            logger.info("collecting %s (batch %s)", self.instruments, self.batch_id)
+            while not self._stop.wait(0.5):
+                if self._writer_error:
+                    raise CollectorError("raw writer failed")
+        except BaseException as exc:
+            failure = exc
         finally:
-            logger.info("stopping collector...")
             self.live.set_connection("stopping")
             try:
-                client.release()
-            except Exception:
-                logger.exception("release failed")
-            self._stop.set()
-            self._queue.put(None)  # wake the writer
-            writer_thread.join(timeout=30)
-            self._finalize_all()
-            self._close_live_feed()
-            self.db.close_batch(self.batch_id, status="finished",
-                                note=f"stopped by signal {stop_signals['sig'] or 'user'}")
-            if self._dashboard is not None:
-                self._dashboard.shutdown()
-            logger.info("batch %s closed; data finalized", self.batch_id)
+                # Release callbacks before asking the writer to drain its queue.
+                if client is not None:
+                    client.release()
+                self._writer_done.set()
+                if writer_thread:
+                    writer_thread.join(timeout=60)
+                    if writer_thread.is_alive():
+                        raise CollectorError("writer did not stop; staging retained")
+                if self._writer_error:
+                    raise CollectorError("writer failed; check disk and staging")
+                self._finalize_all()
+            except BaseException as exc:
+                failure = failure or exc
+            finally:
+                self._stop.set()
+                self._close_live_feed()
+                self.password = ""
+                self.user = ""
+                if self._dashboard:
+                    self._dashboard.shutdown()
+                for sig, handler in old_handlers.items():
+                    signal.signal(sig, handler)
+                try:
+                    if batch_created:
+                        self.db.close_batch(self.batch_id, status="failed" if failure else "finished")
+                finally:
+                    lock.close()
+            self.live.set_connection("failed" if failure else "stopped")
+        if failure:
+            raise failure
+        logger.info("batch %s closed; data finalized", self.batch_id)
 
     def stop(self) -> None:
         self._stop.set()
@@ -232,36 +222,36 @@ class CollectorService:
 
     def on_rsp_user_login(self, trading_day, broker, user, error_id, error_msg):
         if error_id != 0:
-            logger.error("login failed: %s %s", error_id, error_msg)
-            self.live.set_connection("login_failed", f"{error_id} {error_msg}")
+            logger.error("login failed (code=%s)", error_id)
+            self.live.set_connection("login_failed", f"登录失败，CTP 错误码 {error_id}")
             return
-        logger.info("login ok: broker=%s user=%s trading_day=%s",
-                    broker, _mask_user(user), trading_day)
+        logger.info("login succeeded; trading_day=%s", trading_day)
         self.live.ctp_trading_day = trading_day
-        self.live.login_user_masked = _mask_user(user)
+        self.live.login_user_masked = ""
         self.live.set_connection("logged_in", f"trading_day={trading_day}")
-        rc = self._client_ref.resubscribe() or self._client_ref.subscribe(
-            self.instruments)
+        subscriptions = [i.lower() if self.config.exchange_of(i) in ("DCE", "SHFE", "INE")
+                         else i for i in self.instruments]
+        rc = self._client_ref.subscribe(subscriptions)
         logger.info("subscribe request sent (rc=%s)", rc)
 
     def on_rsp_sub_market_data(self, instrument, error_id, error_msg):
         if error_id != 0:
-            logger.error("subscribe %s failed: %s %s", instrument, error_id,
-                         error_msg)
+            logger.error("subscription failed (code=%s)", error_id)
+            self.live.set_connection("subscription_failed", f"CTP 错误码 {error_id}")
         else:
             logger.info("subscribed: %s", instrument)
 
     def on_rsp_unsub_market_data(self, instrument, error_id, error_msg):
-        logger.info("unsubscribed: %s (%s %s)", instrument, error_id, error_msg)
+        logger.info("unsubscribed: %s (code=%s)", instrument, error_id)
 
     def on_rsp_error(self, error_id, error_msg):
-        logger.error("CTP rsp error: %s %s", error_id, error_msg)
+        logger.error("CTP response error (code=%s)", error_id)
 
     def on_rsp_user_logout(self, error_id, error_msg):
-        logger.info("logout: %s %s", error_id, error_msg)
+        logger.info("logout (code=%s)", error_id)
 
     def on_depth_market_data(self, fields: dict) -> None:
-        inst = fields.get("InstrumentID", "")
+        inst = fields.get("InstrumentID", "").upper()
         state = self._states.get(inst)
         if state is None:  # not requested but delivered
             return
@@ -323,7 +313,7 @@ class CollectorService:
             live_state.note_anomaly("last_outside_quote")
 
         # live feed record (derived data only)
-        self._queue.put(("live", {
+        self._enqueue(("live", {
             "ts_recv_ns": recv_ns,
             "instrument": inst,
             "batch_id": self.batch_id,
@@ -342,47 +332,59 @@ class CollectorService:
         }))
 
         # raw row (canonical schema; values verbatim incl. sentinels)
-        self._queue.put(("raw", (PartitionKey(inst, trading_day), row)))
+        self._enqueue(("raw", (PartitionKey(inst, trading_day), row)))
 
     # ------------------------------------------------------------------
     # Writer thread
     # ------------------------------------------------------------------
+    def _enqueue(self, item):
+        while not self._writer_error:
+            try:
+                self._queue.put(item, timeout=0.5)
+                return
+            except queue.Full:
+                continue
+        self.stop()
+
     def _writer_loop(self) -> None:
         self._writer_started.set()
         last_flush = time.monotonic()
-        while True:
-            timeout = max(0.2, self.config.collector.flush_interval_s
-                          - (time.monotonic() - last_flush))
-            try:
-                item = self._queue.get(timeout=timeout)
-            except queue.Empty:
-                item = None
-            if item is not None:
-                kind, payload = item
+        try:
+            while not (self._writer_done.is_set() and self._queue.empty()):
+                try:
+                    kind, payload = self._queue.get(timeout=0.2)
+                except queue.Empty:
+                    kind = None
                 if kind == "live":
                     self._write_live(payload)
                 elif kind == "raw":
                     key, row = payload
                     with self._buffer_lock:
                         self._buffers.setdefault(key, []).append(row)
-                if self._queue.qsize() > 50_000:
-                    logger.warning("writer queue backlog: %d",
-                                   self._queue.qsize())
-            due = (time.monotonic() - last_flush
-                   >= self.config.collector.flush_interval_s)
-            if (item is None and self._stop.is_set()) or due:
-                self._flush()
-                last_flush = time.monotonic()
-                if self._stop.is_set() and self._queue.empty():
+                due = time.monotonic() - last_flush >= self.config.collector.flush_interval_s
+                full = any(len(rows) >= self.config.collector.flush_rows for rows in self._buffers.values())
+                if due or full:
                     self._flush()
-                    break
+                    last_flush = time.monotonic()
+            self._flush()
+        except Exception as exc:
+            self._writer_error = exc
+            logger.error("raw writer failed (%s); stopping collection", type(exc).__name__)
+            self.stop()
 
     def _flush(self, keys=None) -> None:
         with self._buffer_lock:
             keys = [k for k in self._buffers if self._buffers[k]]
             buffers = {k: self._buffers.pop(k) for k in keys}
-        for key, rows in buffers.items():
-            self._write_part(key, rows)
+        pending = list(buffers.items())
+        for pos, (key, rows) in enumerate(pending):
+            try:
+                self._write_part(key, rows)
+            except Exception:
+                with self._buffer_lock:
+                    for remaining_key, remaining_rows in pending[pos + 1:]:
+                        self._buffers[remaining_key] = remaining_rows + self._buffers.get(remaining_key, [])
+                raise
         for inst, state in self._states.items():
             if state.msg_count:
                 self.db.update_batch_instrument(
@@ -400,7 +402,11 @@ class CollectorService:
             }
             table = pa.Table.from_arrays(
                 [arrays[n] for n in RAW_SCHEMA.names], schema=RAW_SCHEMA)
-            idx = self._part_counters.get(key, 0) + 1
+            previous = self._part_counters.get(key)
+            if previous is None:
+                previous = max((int(p.stem.split("-")[1]) for p in
+                                self.store.staging_dir(key).glob("part-*.parquet")), default=0)
+            idx = previous + 1
             self.store.write_staging_part(key, table, idx)
             self._part_counters[key] = idx
             logger.debug("wrote %s part %d (%d rows)", key, idx, len(rows))
@@ -408,7 +414,8 @@ class CollectorService:
             logger.exception("failed writing staging part for %s; keeping rows",
                              key)
             with self._buffer_lock:
-                self._buffers.setdefault(key, []).extend(rows)
+                self._buffers[key] = rows + self._buffers.get(key, [])
+            raise
 
     # ------------------------------------------------------------------
     # Live feed
@@ -425,17 +432,17 @@ class CollectorService:
                 self._live_feed_path = live_feed_path(
                     self.config.paths.live_dir, rec["quote"]["trading_day"])
                 self._live_feed_file = open(self._live_feed_path, "a",
-                                            encoding="utf-8")
-                self._live_feed_rows = sum(
-                    1 for _ in open(self._live_feed_path, encoding="utf-8"))
+                                            encoding="utf-8", buffering=1)
+                with open(self._live_feed_path, encoding="utf-8") as stream:
+                    self._live_feed_rows = sum(1 for _ in stream)
             self._live_feed_file.write(json.dumps(rec, ensure_ascii=False) + "\n")
             self._live_feed_rows += 1
             if self._live_feed_rows >= self.config.collector.live_feed_rows:
-                self._live_feed_file.flush()
+                self._close_live_feed()
                 os.replace(self._live_feed_path,
                            self._live_feed_path.with_suffix(".1.jsonl"))
                 self._live_feed_file = open(self._live_feed_path, "a",
-                                            encoding="utf-8")
+                                            encoding="utf-8", buffering=1)
                 self._live_feed_rows = 0
         except Exception:
             logger.exception("live feed write failed")
@@ -454,14 +461,6 @@ class CollectorService:
     # ------------------------------------------------------------------
     def _finalize_all(self) -> None:
         self._flush()
-        with self._buffer_lock:
-            keys = list(self._buffers.keys())
-        for key in keys:
-            rows = self._buffers.get(key) or []
-            if rows:
-                self._write_part(key, rows)
-                with self._buffer_lock:
-                    self._buffers.pop(key, None)
         results = self.store.finalize_all()
         for r in results:
             self.db.register_raw_file(
@@ -488,9 +487,10 @@ class CollectorService:
                         instrument_id=key.instrument_id,
                         trading_day=key.trading_day, path=r.path, rows=r.rows,
                         sha256=r.sha256, part_count=r.part_count,
-                        batch_id="unknown-crashed-run")
+                        batch_id=None)
             except Exception:
                 logger.exception("could not finalize leftover %s", key)
+                raise
 
     # ------------------------------------------------------------------
     # Internals
@@ -503,6 +503,14 @@ class CollectorService:
             d.mkdir(parents=True, exist_ok=True)
         if self.config.collector.finalize_on_start:
             self._finalize_previous_staging()
+        # Recover files published before a crash interrupted SQLite registration.
+        known = {r["path"] for r in self.db.get_raw_files()}
+        from app.storage.parquet_store import sha256_of_file
+        for key in self.store.list_partitions():
+            for path in self.store.final_files(key):
+                if str(path) not in known:
+                    self.db.register_raw_file(key.instrument_id, key.trading_day, path,
+                        self.store._rowcount(path), sha256_of_file(path), 0, batch_id=None)
 
     def _start_dashboard(self) -> None:
         from app.dashboard.server import DashboardServer

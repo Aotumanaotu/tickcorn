@@ -225,6 +225,12 @@ class MetadataDB:
                           rows: int, sha256: str, part_count: int,
                           batch_id: Optional[str]) -> int:
         with self.connect() as conn:
+            existing = conn.execute("SELECT file_id, sha256 FROM raw_files WHERE path = ?",
+                                    (str(path),)).fetchone()
+            if existing:
+                if existing["sha256"] != sha256:
+                    raise ValueError("Raw file hash changed after registration")
+                return int(existing["file_id"])
             cur = conn.execute(
                 """INSERT INTO raw_files
                        (instrument_id, trading_day, path, rows, sha256, size_bytes,

@@ -31,6 +31,14 @@ from app.common.schema import RAW_SCHEMA, PartitionKey
 logger = get_logger("storage.parquet")
 
 
+def _sync_directory(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def sha256_of_file(path: Path, chunk_size: int = 1 << 20) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -73,7 +81,12 @@ class RawParquetStore:
         path = sdir / f"part-{part_index:06d}.parquet"
         if path.exists():
             raise StorageError(f"staging part already exists (refusing to overwrite): {path}")
-        pq.write_table(table, path, compression="zstd")
+        tmp = path.with_suffix(".tmp")
+        pq.write_table(table, tmp, compression="zstd")
+        with tmp.open("rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+        _sync_directory(sdir)
         return path
 
     def list_staging_partitions(self) -> list[PartitionKey]:
@@ -97,8 +110,8 @@ class RawParquetStore:
     def finalize(self, key: PartitionKey, force: bool = False) -> Optional[FinalizeResult]:
         """Merge staging parts into the immutable final file.
 
-        If the final file already exists: verifies it against staging and
-        refuses to overwrite unless force=True.
+        Later collections append content-addressed segments. No finalized file
+        is ever overwritten; interrupted publications are recovered idempotently.
         """
         final_path = key.dir(self.raw_root) / "snapshots.parquet"
         sdir = self.staging_dir(key)
@@ -110,38 +123,42 @@ class RawParquetStore:
                                       sha256=sha256_of_file(final_path),
                                       path=final_path)
             return None
-        if final_path.exists() and not force:
-            raise StorageError(
-                f"final file already exists for {key}: {final_path}. "
-                f"Use force=True to replace (this breaks immutability!).")
-
-        tables = [pq.read_table(p, schema=RAW_SCHEMA) for p in parts]
-        expected_rows = sum(t.num_rows for t in tables)
-        merged = pa.concat_tables(tables) if tables else RAW_SCHEMA.empty_table()
-        if merged.num_rows != expected_rows:
-            raise StorageError(
-                f"row count mismatch while merging {key}: "
-                f"{merged.num_rows} != {expected_rows}")
-
-        tmp_path = final_path.with_suffix(".parquet.tmp")
-        pq.write_table(merged, tmp_path, compression="zstd")
-        os.replace(tmp_path, final_path)
-
-        result = FinalizeResult(
-            key=key,
-            rows=merged.num_rows,
-            part_count=len(parts),
-            sha256=sha256_of_file(final_path),
-            path=final_path,
-        )
-
-        # Verify the written file reads back correctly before dropping staging.
-        if self._rowcount(final_path) != result.rows:
-            raise StorageError(f"verification failed for {final_path}")
-
-        # Make raw immutable at the filesystem level and clean staging.
+        if force:
+            raise StorageError("Replacing finalized raw data is not supported")
+        tmp_path = key.dir(self.raw_root) / "snapshots.parquet.tmp"
+        expected_rows = 0
+        with pq.ParquetWriter(tmp_path, RAW_SCHEMA, compression="zstd") as writer:
+            for part in parts:
+                for batch in pq.ParquetFile(part).iter_batches(batch_size=65536):
+                    table = pa.Table.from_batches([batch]).cast(RAW_SCHEMA)
+                    expected_rows += table.num_rows
+                    writer.write_table(table)
+        if self._rowcount(tmp_path) != expected_rows:
+            raise StorageError("Raw finalization row count mismatch")
+        with tmp_path.open("rb") as stream:
+            os.fsync(stream.fileno())
+        digest = sha256_of_file(tmp_path)
+        # Recover publication interrupted before staging cleanup idempotently.
+        existing = next((p for p in self.final_files(key)
+                         if sha256_of_file(p) == digest), None)
+        if existing:
+            final_path = existing
+            tmp_path.unlink()
+        else:
+            if final_path.exists():
+                final_path = key.dir(self.raw_root) / f"snapshots-{digest}.parquet"
+            os.replace(tmp_path, final_path)
+        result = FinalizeResult(key, expected_rows, len(parts), digest, final_path)
         os.chmod(final_path, 0o444)
-        shutil.rmtree(sdir)
+        _sync_directory(final_path.parent)
+        # Delete only the parts included above, never a concurrent new part.
+        for part in parts:
+            part.unlink()
+        try:
+            sdir.rmdir()
+        except OSError:
+            pass
+
         logger.info("finalized %s: %d rows from %d parts, sha256=%s...",
                     key, result.rows, result.part_count, result.sha256[:12])
         return result
@@ -170,19 +187,18 @@ class RawParquetStore:
     def final_path(self, key: PartitionKey) -> Path:
         return key.dir(self.raw_root) / "snapshots.parquet"
 
+    def final_files(self, key: PartitionKey) -> list[Path]:
+        return sorted(key.dir(self.raw_root).glob("snapshots*.parquet"))
+
+    def partition_files(self, key: PartitionKey) -> list[Path]:
+        return self.final_files(key) + sorted(self.staging_dir(key).glob("part-*.parquet"))
+
     def read_partition(self, key: PartitionKey, columns: Optional[list[str]] = None
                        ) -> pa.Table:
-        """Read a finalized partition. Prefers the final file; falls back to
-        staging parts (e.g. while collection is still running)."""
-        final = self.final_path(key)
-        if final.exists():
-            return pq.read_table(final, columns=columns)
-        sdir = self.staging_dir(key)
-        parts = sorted(sdir.glob("part-*.parquet")) if sdir.is_dir() else []
-        if not parts:
+        paths = self.partition_files(key)
+        if not paths:
             raise StorageError(f"no data for partition {key}")
-        tables = [pq.read_table(p, columns=columns) for p in parts]
-        return pa.concat_tables(tables)
+        return pa.concat_tables([pq.ParquetFile(p).read(columns=columns) for p in paths])
 
     def list_partitions(self, instrument_id: Optional[str] = None
                         ) -> list[PartitionKey]:
@@ -193,7 +209,7 @@ class RawParquetStore:
         pattern = f"instrument={instrument_id}" if instrument_id else "instrument=*"
         for inst_dir in sorted(self.raw_root.glob(pattern)):
             for day_dir in sorted(inst_dir.glob("trading_day=*")):
-                if (day_dir / "snapshots.parquet").exists() or any(
+                if any(day_dir.glob("snapshots*.parquet")) or any(
                         (day_dir / "_staging").glob("part-*.parquet")):
                     out.append(PartitionKey(
                         instrument_id=inst_dir.name.split("=", 1)[1],

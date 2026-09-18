@@ -22,7 +22,7 @@ from app.common.constants import STATE5_ORDER, STATE8_ORDER
 
 
 def _pair_counts(states: pd.Series, order: list[str]) -> pd.DataFrame:
-    s = states.dropna()
+    s = states
     if len(s) < 2:
         return pd.DataFrame(0, index=order, columns=order, dtype=float)
     cur = s.iloc[:-1].to_numpy()
@@ -50,12 +50,20 @@ def build_state_series(df: pd.DataFrame, which: str = "state5") -> pd.Series:
     return df[which]
 
 
+def _segmented_matrix(df, which, order):
+    if "segment_id" not in df:
+        return transition_matrix(build_state_series(df, which), order)
+    counts = sum((_pair_counts(g[which], order) for _, g in df.groupby("segment_id")),
+                 pd.DataFrame(0.0, index=order, columns=order))
+    return counts.div(counts.sum(axis=1).replace(0, np.nan), axis=0).fillna(0.0)
+
+
 def state5_matrix(df: pd.DataFrame) -> pd.DataFrame:
-    return transition_matrix(build_state_series(df, "state5"), STATE5_ORDER)
+    return _segmented_matrix(df, "state5", STATE5_ORDER)
 
 
 def state8_matrix(df: pd.DataFrame) -> pd.DataFrame:
-    return transition_matrix(build_state_series(df, "state8"), STATE8_ORDER)
+    return _segmented_matrix(df, "state8", STATE8_ORDER)
 
 
 # ---------------------------------------------------------------------
@@ -68,6 +76,11 @@ def next_genuine_direction(df: pd.DataFrame, horizon: int) -> pd.Series:
 
     Uses only rows t+1 .. t+horizon (strictly after t).
     """
+    if horizon < 1:
+        raise ValueError("horizon must be positive")
+    if "segment_id" in df and df["segment_id"].nunique() > 1:
+        return pd.concat([next_genuine_direction(g.drop(columns="segment_id"), horizon)
+                          for _, g in df.groupby("segment_id", sort=False)]).reindex(df.index)
     n = len(df)
     out = np.zeros(n, dtype=np.int8)
     if "label" not in df.columns or n == 0:
@@ -93,12 +106,18 @@ def next_genuine_direction(df: pd.DataFrame, horizon: int) -> pd.Series:
     return pd.Series(out, index=df.index, name="next_genuine_dir")
 
 
+def _complete_horizon(df, horizon):
+    if "segment_id" in df:
+        return df["segment_id"].eq(df["segment_id"].shift(-horizon))
+    return pd.Series(np.arange(len(df)) + horizon < len(df), index=df.index)
+
+
 def direction_by_state(df: pd.DataFrame, horizon: int,
                        order: list[str] | None = None) -> pd.DataFrame:
     """P(next genuine move direction | current state) within horizon."""
     states = build_state_series(df, "state5")
     nxt = next_genuine_direction(df, horizon)
-    valid = states.notna()
+    valid = states.notna() & _complete_horizon(df, horizon)
     st = states[valid]
     nd = nxt[valid]
     order = order or STATE5_ORDER
@@ -107,12 +126,12 @@ def direction_by_state(df: pd.DataFrame, horizon: int,
         m = st == s
         total = int(m.sum())
         if total == 0:
-            rows.append({"state": s, "n": 0, "p_up": np.nan, "p_down": np.nan,
+            rows.append({"state": s, "horizon": horizon, "n": 0, "p_up": np.nan, "p_down": np.nan,
                          "p_none": np.nan})
             continue
         up = int((nd[m] == 1).sum())
         down = int((nd[m] == -1).sum())
-        rows.append({"state": s, "n": total, "p_up": up / total,
+        rows.append({"state": s, "horizon": horizon, "n": total, "p_up": up / total,
                      "p_down": down / total, "p_none": (total - up - down) / total})
     return pd.DataFrame(rows)
 
@@ -128,7 +147,7 @@ def obi_conditional_table(df: pd.DataFrame, edges: list[float],
         raise ValueError("obi1 column missing")
     obi = pd.to_numeric(df["obi1"], errors="coerce")
     nxt = next_genuine_direction(df, horizon)
-    valid = obi.notna() & (obi >= edges[0]) & (obi <= edges[-1])
+    valid = obi.notna() & (obi >= edges[0]) & (obi <= edges[-1]) & _complete_horizon(df, horizon)
     obi_v, nxt_v = obi[valid], nxt[valid]
 
     labels = [f"[{edges[i]:.1f},{edges[i+1]:.1f}" + ("]" if i == len(edges) - 2

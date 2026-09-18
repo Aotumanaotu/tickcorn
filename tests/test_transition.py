@@ -49,10 +49,10 @@ def test_state5_matrix_simple():
 
 
 def test_ambiguous_skipped_in_state5():
-    """AMBIGUOUS transitions are dropped; the chain connects the two UPs."""
+    """Do not manufacture adjacent events across an unknown observation."""
     df = _classified_df([UP, AMB, UP])
     m = state5_matrix(df)
-    assert m.loc["QUOTE_UP", "QUOTE_UP"] == 1.0
+    assert m.loc["QUOTE_UP", "QUOTE_UP"] == 0.0
 
 
 def test_state8_includes_ambiguous():
@@ -95,5 +95,6 @@ def test_direction_by_state():
     t = direction_by_state(df, horizon=3)
     row = t[t["state"] == "BOUNCE_UP"].iloc[0]
     # BU rows 1..4; genuine UP at row 5 within horizon for rows 2,3,4 (dist 3,2,1)
-    assert row["p_up"] == 0.75
-    assert row["n"] == 4
+    # Only rows 1 and 2 have a complete three-snapshot future window.
+    assert row["p_up"] == 0.5
+    assert row["n"] == 2

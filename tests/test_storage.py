@@ -64,13 +64,18 @@ def test_staging_write_and_finalize(store):
     assert result.sha256 == sha256_of_file(final)
 
 
-def test_finalize_refuses_overwrite(store):
+def test_finalize_preserves_previous_segment(store):
     key = PartitionKey("C2701", "2026-09-18")
     store.write_staging_part(key, _table(5), 1)
-    store.finalize(key)
+    first = store.finalize(key)
+    original_hash = first.sha256
     store.write_staging_part(key, _table(5, start_seq=5), 2)
-    with pytest.raises(Exception):
-        store.finalize(key)  # refuses without force
+    assert store.read_partition(key).num_rows == 10
+    second = store.finalize(key)
+    assert second.path != first.path
+    assert sha256_of_file(first.path) == original_hash
+    assert store.read_partition(key).num_rows == 10
+    assert len(store.final_files(key)) == 2
 
 
 def test_staging_part_never_overwritten(store):

@@ -2,6 +2,8 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>玉米期货 1-Tick 微观结构 · 控制与实时面板</title>
 <style>
   :root { --bg:#0e1720; --panel:#16222e; --line:#24374a; --txt:#dce7f2;
@@ -49,7 +51,7 @@
   .form-grid { display:grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
   .form-grid .wide { grid-column: 1 / -1; }
   label { display:block; font-size:11px; color:var(--muted); margin: 6px 0 2px; }
-  input[type=text], input[type=password], textarea {
+  input[type=text], input[type=password], textarea, select {
     width:100%; background:#0d1720; color:var(--txt); border:1px solid var(--line);
     border-radius:6px; padding:6px 8px; font:inherit; }
   textarea { min-height: 66px; resize: vertical; }
@@ -65,6 +67,10 @@
   .chk { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--muted); }
   #ctlMsg { font-size:12px; margin-left:8px; }
   .ok { color: var(--acc); } .fail { color: var(--up); }
+  [hidden] { display:none !important; }
+  #loginPanel { max-width:480px; margin:40px auto; }
+  @media(max-width:800px) { .form-grid { grid-template-columns:1fr; }
+    main > .panel { grid-column:span 12; } }
 </style>
 </head>
 <body>
@@ -76,37 +82,59 @@
   <div class="inst-tabs" id="tabs"></div>
 </header>
 <div id="err"></div>
-<main>
+<section class="panel" id="loginPanel" hidden>
+  <h2>登录控制台</h2>
+  <p>请先建立 SSH 隧道，再输入服务器上生成的面板访问令牌。</p>
+  <form id="loginForm">
+    <label for="fToken">面板访问令牌</label>
+    <input id="fToken" type="password" autocomplete="off" required>
+    <div class="btns"><button class="primary" type="submit">登录</button></div>
+    <p id="loginError" class="fail" role="alert"></p>
+  </form>
+</section>
+<main id="workspace" hidden>
   <!-- ================= 采集控制 ================= -->
   <div class="panel c12">
-    <h2>采集控制（SimNow）· 账号仅保存在服务器本地文件（0600 权限），不会进入 git/日志</h2>
+    <h2>采集控制（SimNow）</h2>
     <div class="form-grid">
       <div>
-        <label>合约（空格或逗号分隔，如 C2701 C2705）</label>
-        <input type="text" id="fInstruments" placeholder="C2701">
+        <label for="fInstruments">合约（从官方终端查询当前有效合约，空格或逗号分隔）</label>
+        <input type="text" id="fInstruments" placeholder="输入合约代码">
       </div>
       <div>
-        <label>SimNow 账号</label>
-        <input type="text" id="fUser" autocomplete="off" placeholder="手机号">
+        <label for="fUser">SimNow 账号</label>
+        <input type="text" id="fUser" autocomplete="off" placeholder="输入已获授权的 SimNow 账号">
       </div>
       <div>
-        <label>密码（留空 = 保持已保存的密码）</label>
+        <label for="fPassword">密码（留空 = 保持当前密码）</label>
         <input type="password" id="fPassword" autocomplete="new-password" placeholder="••••••••">
       </div>
+      <div>
+        <label for="fBroker">BrokerID</label>
+        <input type="text" id="fBroker" autocomplete="off" placeholder="按官方接入说明填写">
+      </div>
+      <div>
+        <label for="fSource">行情环境（请与前置对应）</label>
+        <select id="fSource"><option value="simnow_test">SimNow API 测试环境</option>
+          <option value="simnow_standard">SimNow 标准仿真环境</option></select>
+      </div>
       <div class="wide">
-        <label>行情前置地址（每行一个 tcp://IP:PORT；已预填，可从 simnow.com.cn 获取最新）</label>
+        <label for="fFronts">行情前置地址（每行一个 tcp://主机:端口，从 SimNow 官网查询）</label>
         <textarea id="fFronts" spellcheck="false"></textarea>
       </div>
       <div class="wide chk">
         <input type="checkbox" id="fRemember">
-        <label for="fRemember" style="margin:0">在服务器上记住账号密码（data/settings.local.json，0600；不勾选则仅存内存，重启后需重输）</label>
+        <label for="fRemember" style="margin:0">在服务器上记住账号密码（本地受限文件；不勾选则仅本次进程有效）</label>
         <span id="ctlMsg"></span>
       </div>
     </div>
+    <p class="muted">仅使用本人或已获授权的账号和官方行情接口。请确认服务条款允许在服务器所在地使用；测试数据不代表真实市场，不对外分发行情。</p>
     <div class="btns">
       <button class="ghost" onclick="saveSettings()">保存设置</button>
       <button class="primary" id="btnStart" onclick="startCollect()">▶ 开始采集</button>
       <button class="danger" id="btnStop" onclick="stopCollect()">■ 停止采集</button>
+      <button class="ghost" onclick="forgetCredentials()">清除账号密码</button>
+      <button class="ghost" onclick="logout()">退出面板</button>
       <span class="muted" id="mgrStatus"></span>
     </div>
   </div>
@@ -162,21 +190,42 @@ const fmt = (v, d=2) => (v===null||v===undefined||Number.isNaN(v)) ? "–" :
 const timeStr = ns => { const d = new Date(Number(ns)/1e9*1000); return d.toTimeString().slice(0,8); };
 
 /* ---------- token handling ---------- */
-function getToken() {
-  const m = location.search.match(/token=([^&]+)/);
-  if (m) { localStorage.setItem("dashToken", decodeURIComponent(m[1])); history.replaceState(null,"",location.pathname); }
-  return localStorage.getItem("dashToken") || "";
+let accessToken = "";
+let authenticated = false;
+function showLogin() {
+  authenticated = false;
+  $("workspace").hidden = true;
+  $("loginPanel").hidden = false;
+}
+function logout() {
+  accessToken = "";
+  state = null;
+  $("fUser").value = $("fPassword").value = $("fToken").value = "";
+  showLogin();
 }
 async function api(path, opts={}) {
-  opts.headers = Object.assign({"X-Auth-Token": getToken()}, opts.headers||{});
+  opts.headers = Object.assign({"X-Auth-Token": accessToken}, opts.headers||{});
   const r = await fetch(path, Object.assign({cache:"no-store"}, opts));
-  if (r.status === 401) {
-    const t = prompt("访问令牌错误或缺失，请输入 token:");
-    if (t) { localStorage.setItem("dashToken", t); return api(path, opts); }
-    throw new Error("unauthorized");
+  if (r.status === 401) { showLogin(); throw new Error("请输入有效的面板访问令牌"); }
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j.error || `请求失败 (${r.status})`);
   }
   return r;
 }
+$("loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  accessToken = $("fToken").value.trim();
+  try {
+    await api("/api/state");
+    authenticated = true;
+    $("fToken").value = "";
+    $("loginError").textContent = "";
+    $("loginPanel").hidden = true;
+    $("workspace").hidden = false;
+    await loadSettings();
+  } catch (err) { $("loginError").textContent = err.message; }
+});
 
 function labelColor(l) {
   if (!l) return "#43596e";
@@ -201,6 +250,8 @@ async function loadSettings() {
     if ($("fInstruments").value.trim() === "")
       $("fInstruments").value = (j.instruments||[]).join(" ");
     $("fUser").value = j.user || "";
+    $("fBroker").value = j.broker_id || "";
+    $("fSource").value = j.source_kind || "simnow_test";
     $("fPassword").value = "";
     $("fPassword").placeholder = (j.has_password ? "已保存（留空保持不变）" : "输入密码");
     if (!$("fFronts").value.trim())
@@ -209,50 +260,50 @@ async function loadSettings() {
   } catch (e) { /* 401 handled in api() */ }
 }
 
-async function saveSettings() {
-  const body = {
-    instruments: $("fInstruments").value,
-    user: $("fUser").value,
-    fronts: $("fFronts").value,
-    remember: $("fRemember").checked,
-  };
+function settingsBody() {
+  const body = {instruments: $("fInstruments").value, user: $("fUser").value,
+    fronts: $("fFronts").value, broker_id: $("fBroker").value,
+    source_kind: $("fSource").value, remember: $("fRemember").checked};
   if ($("fPassword").value) body.password = $("fPassword").value;
-  const r = await api("/api/settings", {
-    method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(body)});
+  return body;
+}
+async function persistSettings() {
+  const r = await api("/api/settings", {method:"POST",
+    headers:{"Content-Type":"application/json"}, body:JSON.stringify(settingsBody())});
   const j = await r.json();
-  if (j.error) return ctlMsg("保存失败: " + j.error, false);
   $("fPassword").value = "";
-  $("fPassword").placeholder = (j.has_password ? "已保存（留空保持不变）" : "输入密码");
-  ctlMsg("已保存 ✓", true);
+  $("fPassword").placeholder = j.has_password ? "当前已有密码（留空保持）" : "输入密码";
 }
-
+async function saveSettings() {
+  try { await persistSettings(); ctlMsg("设置已保存", true); }
+  catch(e) { ctlMsg(e.message, false); }
+}
 async function startCollect() {
-  ctlMsg("启动中...");
-  await saveSettingsQuiet();
-  const r = await api("/api/collect/start", {method: "POST"});
-  const j = await r.json();
-  if (j.error) return ctlMsg("启动失败: " + j.error, false);
-  ctlMsg("采集已启动 ✓", true);
-}
-async function saveSettingsQuiet() {
-  const body = { instruments: $("fInstruments").value, user: $("fUser").value,
-                 fronts: $("fFronts").value, remember: $("fRemember").checked };
-  if ($("fPassword").value) body.password = $("fPassword").value;
-  try { await api("/api/settings", { method: "POST",
-    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}); } catch(e) {}
+  $("btnStart").disabled = true;
+  try {
+    await persistSettings();
+    await api("/api/collect/start", {method:"POST"});
+    ctlMsg("采集已启动，正在连接行情前置", true);
+  } catch(e) { ctlMsg(e.message, false); }
+  finally { $("btnStart").disabled = false; }
 }
 async function stopCollect() {
-  ctlMsg("停止中...");
-  const r = await api("/api/collect/stop", {method: "POST"});
-  const j = await r.json();
-  if (j.error) return ctlMsg("停止失败: " + j.error, false);
-  ctlMsg("已停止", true);
+  ctlMsg("正在停止并保存数据，请稍候");
+  try { await api("/api/collect/stop", {method:"POST"}); ctlMsg("已停止，数据已保存", true); }
+  catch(e) { ctlMsg(e.message, false); }
+}
+async function forgetCredentials() {
+  try {
+    await api("/api/settings", {method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({user:"", clear_password:true, remember:false})});
+    await loadSettings(); ctlMsg("账号密码已清除", true);
+  } catch(e) { ctlMsg(e.message, false); }
 }
 
 /* ---------- live polling ---------- */
 async function tick() {
   try {
+    if (!authenticated) return;
     const r = await api("/api/state");
     state = await r.json();
     $("err").style.display = "none";
@@ -261,17 +312,17 @@ async function tick() {
     $("err").textContent = "无法连接服务 (" + e + ")。";
     $("err").style.display = "block";
   }
-  setTimeout(tick, REFRESH_MS);
+  finally { setTimeout(tick, REFRESH_MS); }
 }
 
 function render() {
   const mgr = state.manager || {};
   const running = !!mgr.running;
-  $("btnStart").disabled = running;
-  $("btnStop").disabled = !running;
+  $("btnStart").disabled = running || !!mgr.stopping;
+  $("btnStop").disabled = !running || !!mgr.stopping;
   $("mgrStatus").textContent =
       (running ? `运行中 · batch ${mgr.batch_id||""} · ${new Date().toLocaleTimeString()}` :
-                 (mgr.error ? "错误: " + mgr.error : "空闲"))
+                 (mgr.stopping ? "正在停止并保存数据" : (mgr.error ? "错误: " + mgr.error : "空闲")))
       + (mgr.instruments && mgr.instruments.length ? "" : "");
 
   const conn = state.connection || {};
@@ -414,9 +465,13 @@ function drawObi(h) {
 }
 
 window.addEventListener("resize", () => state && render());
-getToken();
-loadSettings();
-tick();
+(async () => {
+  try {
+    await api("/api/state"); authenticated = true;
+    $("workspace").hidden = false; await loadSettings();
+  } catch(e) { showLogin(); }
+  tick();
+})();
 </script>
 </body>
 </html>

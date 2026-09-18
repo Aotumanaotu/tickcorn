@@ -1,12 +1,25 @@
 services:
   corn-tick:
     build: .
-    container_name: corn-tick
+    platform: linux/amd64
     ports:
-      - "8800:8800"          # 控制面板；建议安全组仅放行自己的 IP
+      - "127.0.0.1:8800:8800"
     volumes:
-      - ./data:/app/data     # 原始行情/元数据库/网页端设置 都持久化在宿主机
-    environment:
-      - DASHBOARD_TOKEN=${DASHBOARD_TOKEN:?请先在 .env 里设置 DASHBOARD_TOKEN}
-      - TZ=Asia/Shanghai
+      - corn-data:/app/data
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 120s
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  corn-data:

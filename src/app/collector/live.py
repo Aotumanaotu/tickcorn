@@ -35,6 +35,7 @@ class InstrumentLiveState:
         self.recent_events: deque = deque(maxlen=80)
         self.label_counts: Counter = Counter()
         self.one_tick_last_changes = 0
+        self.unit_label_counts: Counter = Counter()
         self.rate_window: deque = deque(maxlen=600)  # recv ns of recent msgs
         self.prev_quote: Optional[tuple] = None      # (bid, ask, last)
         self.anomaly_counts: Counter = Counter()
@@ -78,6 +79,7 @@ class InstrumentLiveState:
                 dl = derived.get("dl_ticks")
                 if dl is not None and abs(abs(dl) - 1.0) < 1e-9:
                     self.one_tick_last_changes += 1
+                    self.unit_label_counts[label] += 1
                 if label != "NO_MOVE":
                     self.recent_events.appendleft({
                         "ts": recv,
@@ -99,15 +101,16 @@ class InstrumentLiveState:
             rate = 0.0
             if self.rate_window:
                 recent = [t for t in self.rate_window if now - t < 60_000_000_000]
-                rate = len(recent) / 60.0
+                rate = len(recent)
             counts = dict(self.label_counts)
             one_tick = self.one_tick_last_changes
-            bounce = (counts.get("HIGH_CONFIDENCE_BOUNCE_UP", 0)
-                      + counts.get("HIGH_CONFIDENCE_BOUNCE_DOWN", 0)
-                      + counts.get("LIKELY_BOUNCE_UP", 0)
-                      + counts.get("LIKELY_BOUNCE_DOWN", 0))
-            genuine = (counts.get("GENUINE_QUOTE_MOVE_UP", 0)
-                       + counts.get("GENUINE_QUOTE_MOVE_DOWN", 0))
+            unit_counts = self.unit_label_counts
+            bounce = (unit_counts.get("HIGH_CONFIDENCE_BOUNCE_UP", 0)
+                      + unit_counts.get("HIGH_CONFIDENCE_BOUNCE_DOWN", 0)
+                      + unit_counts.get("LIKELY_BOUNCE_UP", 0)
+                      + unit_counts.get("LIKELY_BOUNCE_DOWN", 0))
+            genuine = (unit_counts.get("GENUINE_QUOTE_MOVE_UP", 0)
+                       + unit_counts.get("GENUINE_QUOTE_MOVE_DOWN", 0))
             return {
                 "last": self.last,
                 "history": list(self.history),
@@ -260,6 +263,7 @@ class JsonlTailSource:
                         dl = rec["derived"]["dl_ticks"]
                         if abs(abs(dl) - 1.0) < 1e-9:
                             ts.one_tick_last_changes += 1
+                            ts.unit_label_counts[lab] += 1
                     if lab != "NO_MOVE":
                         ts.recent_events.appendleft({
                             "ts": rec.get("ts_recv_ns"),

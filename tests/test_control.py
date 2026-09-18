@@ -20,7 +20,14 @@ from conftest import ROOT
 
 
 @pytest.fixture()
-def env(tmp_path: Path):
+def env(tmp_path: Path, monkeypatch):
+    class FakeClient:
+        api_version = "test-only"
+        def __init__(self, **kwargs): pass
+        def register_front(self, address): pass
+        def init(self): pass
+        def release(self): pass
+    monkeypatch.setattr("app.collector.service.CtpMdClient", FakeClient)
     config = load_config(config_dir=ROOT / "config", data_dir_override=tmp_path)
     manager = CollectorManager(config)
     return config, manager, tmp_path
@@ -30,13 +37,14 @@ def test_settings_store_permissions_and_persistence(env):
     config, manager, tmp_path = env
     store = SettingsStore(tmp_path)
     s = store.load()
-    s.user = "13800000000"
+    s.user = "test-user"
     s.password = "secret"
     s.remember = False
     store.save(s)
     # password must NOT be persisted when remember=False
     raw = json.loads(store.path.read_text())
     assert raw["password"] == ""
+    assert raw["user"] == ""
     mode = stat.S_IMODE(store.path.stat().st_mode)
     assert mode == 0o600
 
@@ -55,26 +63,27 @@ def test_manager_update_settings(env):
     config, manager, tmp_path = env
     out = manager.update_settings({
         "instruments": "c2701, c2705",
-        "user": "13800000000",
+        "broker_id": "test",
+        "user": "test-user",
         "password": "pw123",
-        "fronts": "tcp://1.2.3.4:1234\ntcp://5.6.7.8:5678",
+        "fronts": "tcp://192.0.2.1:1234\ntcp://192.0.2.2:5678",
         "remember": False,
     })
     assert out["instruments"] == ["C2701", "C2705"]
     assert out["password"] == "********"
-    assert manager.settings.fronts == ["tcp://1.2.3.4:1234",
-                                       "tcp://5.6.7.8:5678"]
+    assert manager.settings.fronts == ["tcp://192.0.2.1:1234",
+                                       "tcp://192.0.2.2:5678"]
     # password kept when a later update omits it
     manager.update_settings({"instruments": "C2709"})
     assert manager.settings.password == "pw123"
-    assert manager.settings.user == "13800000000"
+    assert manager.settings.user == "test-user"
 
 
 def test_manager_start_requires_credentials(env):
     config, manager, tmp_path = env
     manager.settings.user = ""
     manager.settings.password = ""
-    manager.settings.fronts = ["tcp://1.2.3.4:1"]
+    manager.settings.fronts = ["tcp://192.0.2.1:1"]
     with pytest.raises(Exception):
         manager.start()
 
@@ -85,7 +94,8 @@ def test_manager_start_stop_lifecycle(env):
     config, manager, tmp_path = env
     manager.update_settings({
         "instruments": "C2701",
-        "user": "13800000000",
+        "broker_id": "test",
+        "user": "test-user",
         "password": "pw123",
         "fronts": "tcp://127.0.0.1:1",   # connection refused instantly
     })
@@ -128,7 +138,7 @@ def test_control_api_endpoints(env):
         code, s = _req(f"http://127.0.0.1:{port}/api/settings")
         assert code == 200 and "yaml_fronts" in s
         code, s = _req(f"http://127.0.0.1:{port}/api/settings", "POST", {
-            "instruments": "C2701", "user": "13800000000",
+            "instruments": "C2701", "broker_id": "test", "user": "test-user",
             "password": "pw", "fronts": "tcp://127.0.0.1:1"})
         assert s["password"] == "********"
 
@@ -155,12 +165,13 @@ def test_control_api_token_auth(env):
         code, _ = _req(f"http://127.0.0.1:{port}/api/state",
                        headers={"X-Auth-Token": "s3cret"})
         assert code == 200
-        # query param -> ok
-        code, _ = _req(f"http://127.0.0.1:{port}/api/state?token=s3cret")
-        assert code == 200
-        # index page also protected
+        # Tokens never travel in query strings; only the empty login shell is public.
         with pytest.raises(urllib.error.HTTPError) as e:
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/")
+            _req(f"http://127.0.0.1:{port}/api/state?token=s3cret")
         assert e.value.code == 401
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/") as resp:
+            assert "loginPanel" in resp.read().decode()
+        code, health = _req(f"http://127.0.0.1:{port}/healthz")
+        assert health == {"status": "ok"}
     finally:
         server.shutdown()

@@ -354,6 +354,7 @@ class CtpMdClient:
             if self._created and not self._released:
                 self._lib.md_release()
                 self._released = True
+                self._credentials = None
                 logger.info("CTP MdApi released")
 
     def _check_created(self) -> None:
