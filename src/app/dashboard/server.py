@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import shutil
 from urllib.parse import urlsplit
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -117,6 +118,35 @@ class DashboardServer:
                     return self._json(resp)
                 if path == "/api/monitor" and outer.manager is not None:
                     return self._json(outer.manager.monitor_settings_masked())
+                if path.startswith("/api/") and outer.manager is not None:
+                    try:
+                        from app.dashboard.environments import PRESETS
+                        from app.dashboard.reports import briefing, partitions
+                        if path == "/api/environments":
+                            return self._json({"presets": PRESETS})
+                        if path == "/api/briefing":
+                            return self._json(briefing(outer.manager))
+                        if path == "/api/reports":
+                            return self._json({"partitions": partitions(outer.manager.config),
+                                               "jobs": outer.manager.reports.list()})
+                        if path.startswith("/api/reports/"):
+                            bits = path.split("/")
+                            if len(bits) != 5:
+                                raise AppError("下载地址无效")
+                            file, mime = outer.manager.reports.download(bits[3], bits[4])
+                            with file.open("rb") as stream:
+                                self.send_response(200)
+                                self.send_header("Content-Type", mime)
+                                self.send_header("Content-Length", str(file.stat().st_size))
+                                self.send_header("Content-Disposition", f'attachment; filename="{bits[3]}-{file.name}"')
+                                self.end_headers()
+                                shutil.copyfileobj(stream, self.wfile)
+                            return
+                    except AppError as e:
+                        return self._json({"error": str(e)}, 400)
+                    except Exception as e:
+                        logger.error("report API failed (%s)", type(e).__name__)
+                        return self._json({"error": "简报读取失败，请检查服务状态和磁盘"}, 500)
                 if path in ("/", "/index.html"):
                     html = (outer._static_dir / "index.html").read_text(
                         encoding="utf-8").replace("__REFRESH_MS__",
@@ -150,6 +180,8 @@ class DashboardServer:
                         return self._json(outer.manager.update_monitor_settings(body))
                     if path == "/api/monitor/test":
                         return self._json(outer.manager.request_monitor_test())
+                    if path == "/api/reports":
+                        return self._json(outer.manager.create_report(body), 202)
                     if path == "/api/collect/start":
                         return self._json(outer.manager.start())
                     if path == "/api/collect/stop":

@@ -53,9 +53,11 @@ class AnalysisOptions:
     horizons: tuple[int, ...] = (1, 2, 3, 5)
     tick_size: Optional[float] = None
     title: str = ""
+    raw_source: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
+            "raw_source": self.raw_source,
             "strict_symmetric_quote_move": self.strict,
             "mid_tolerance_ticks": self.mid_tolerance_ticks,
             "lookbacks": list(self.lookbacks),
@@ -116,7 +118,8 @@ def _run_analysis(config: AppConfig, instrument_id: str, days: list[str],
 
     if any(any(repo.store.staging_dir(k).glob("part-*.parquet")) for k in existing):
         raise ValueError("请先停止采集或执行 finalize，再分析已归档的数据")
-    clean = repo.load_clean_range(instrument_id, days, tick_size=tick_size)
+    clean = repo.load_clean_range(instrument_id, days, tick_size=tick_size,
+                                 raw_source=options.raw_source)
     df = clean.df
     logger.info("loaded %d clean snapshots for %s %s (dup=%d invalid=%d)",
                 len(df), instrument_id, days, clean.dropped_duplicates,

@@ -69,6 +69,12 @@
   .ok { color: var(--acc); } .fail { color: var(--up); }
   [hidden] { display:none !important; }
   #loginPanel { max-width:480px; margin:40px auto; }
+  pre.briefing { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.8; }
+  .report-item { border-top:1px solid var(--line); padding:12px 0; }
+  dialog { width:95vw; max-width:1200px; background:var(--panel); color:var(--txt);
+    border:1px solid var(--line); border-radius:10px; }
+  dialog::backdrop { background:#000b; }
+  #reportFrame { width:100%; height:75vh; border:0; background:white; margin-top:12px; }
   @media(max-width:800px) { .form-grid { grid-template-columns:1fr; }
     main > .panel { grid-column:span 12; } }
 </style>
@@ -97,6 +103,13 @@
   <div class="panel c12">
     <h2>采集控制（SimNow）</h2>
     <div class="form-grid">
+      <div class="wide">
+        <label for="fEnvironment">接入预设（选择后自动填写行情地址、BrokerID 和数据来源）</label>
+        <select id="fEnvironment" onchange="applyEnvironment()">
+          <option value="custom">自定义配置 / 保留现有设置</option>
+        </select>
+        <p class="muted" id="environmentHint">保留已保存的配置。可选择官方环境预设，也可自行修改地址和 BrokerID。</p>
+      </div>
       <div>
         <label for="fInstruments">合约（从官方终端查询当前有效合约，空格或逗号分隔）</label>
         <input type="text" id="fInstruments" placeholder="输入合约代码">
@@ -114,7 +127,7 @@
         <input type="text" id="fBroker" autocomplete="off" placeholder="按官方接入说明填写">
       </div>
       <div>
-        <label for="fSource">行情环境（请与前置对应）</label>
+        <label for="fSource">数据来源（与实际前置对应）</label>
         <select id="fSource"><option value="simnow_test">SimNow API 测试环境</option>
           <option value="simnow_standard">SimNow 标准仿真环境</option></select>
       </div>
@@ -128,15 +141,46 @@
         <span id="ctlMsg"></span>
       </div>
     </div>
+    <p class="muted">预设来自 SimNow 公开接入说明，地址变化时可改为自定义。这里只连接行情接口，无需填写交易前置、AppID 或交易认证码。</p>
     <p class="muted">仅使用本人或已获授权的账号和官方行情接口。请确认服务条款允许在服务器所在地使用；测试数据不代表真实市场，不对外分发行情。</p>
     <div class="btns">
-      <button class="ghost" onclick="saveSettings()">保存设置</button>
+      <button class="ghost" id="btnSaveSettings" onclick="saveSettings()">保存设置</button>
       <button class="primary" id="btnStart" onclick="startCollect()">▶ 开始采集</button>
       <button class="danger" id="btnStop" onclick="stopCollect()">■ 停止采集</button>
-      <button class="ghost" onclick="forgetCredentials()">清除账号密码</button>
+      <button class="ghost" id="btnForget" onclick="forgetCredentials()">清除账号密码</button>
       <button class="ghost" onclick="logout()">退出面板</button>
       <span class="muted" id="mgrStatus"></span>
     </div>
+  </div>
+
+  <div class="panel c12">
+    <h2>运行简报与分析报告</h2>
+    <p class="muted">运行简报可随时查看。分析报告需先停止采集并保存数据；按所选来源单独统计，不混合两套环境。</p>
+    <div class="btns">
+      <button class="ghost" id="btnBriefing" onclick="generateBriefing()">生成运行简报</button>
+      <button class="ghost" id="btnDownloadBriefing" onclick="downloadBriefing()" disabled>下载简报 TXT</button>
+    </div>
+    <pre id="briefingText" class="briefing" hidden></pre>
+    <div class="form-grid">
+      <div>
+        <label for="rPartition">已采集的合约 / 交易日</label>
+        <select id="rPartition"><option value="">暂无数据</option></select>
+      </div>
+      <div>
+        <label for="rSource">本次报告的数据来源</label>
+        <select id="rSource">
+          <option value="simnow_test">SimNow API 测试环境</option>
+          <option value="simnow_standard">SimNow 标准仿真环境</option>
+        </select>
+      </div>
+    </div>
+    <div class="btns">
+      <button class="primary" id="btnGenerateReport" onclick="generateReport()" disabled>生成分析报告</button>
+      <button class="ghost" onclick="loadReports()">刷新数据与报告</button>
+      <span id="reportMsg" role="status" aria-live="polite"></span>
+    </div>
+    <p class="muted">生成期间请等待，暂不能开始采集。完成后可在线查看或下载 HTML / ZIP；下载只包含报告和统计结果。数据来源为采集时的记录标签，测试数据仅供联调。</p>
+    <div id="reportList"></div>
   </div>
 
   <!-- ================= 每日简报 ================= -->
@@ -230,6 +274,10 @@
     </tr></thead><tbody></tbody></table>
   </div>
 </main>
+<dialog id="reportDialog" aria-label="分析报告预览">
+  <button class="ghost" onclick="closeReport()">关闭预览</button>
+  <iframe id="reportFrame" title="分析报告" sandbox="" referrerpolicy="no-referrer"></iframe>
+</dialog>
 <script>
 const REFRESH_MS = __REFRESH_MS__;
 let state = null, curInst = null;
@@ -242,6 +290,8 @@ const timeStr = ns => { const d = new Date(Number(ns)/1e9*1000); return d.toTime
 /* ---------- token handling ---------- */
 let accessToken = "";
 let authenticated = false;
+let environmentPresets = [], reportPartitions = [], reportBusy = false;
+let briefingContent = "", reportRefreshAt = 0;
 function showLogin() {
   authenticated = false;
   $("workspace").hidden = true;
@@ -250,6 +300,11 @@ function showLogin() {
 function logout() {
   accessToken = "";
   state = null;
+  closeReport();
+  $("briefingText").textContent = briefingContent = "";
+  $("briefingText").hidden = true;
+  $("reportList").replaceChildren();
+  $("btnDownloadBriefing").disabled = true;
   $("fUser").value = $("fPassword").value = $("fToken").value = "";
   showLogin();
 }
@@ -275,6 +330,7 @@ $("loginForm").addEventListener("submit", async e => {
     $("workspace").hidden = false;
     await loadSettings();
     await loadMonitor();
+    await loadReports();
   } catch (err) { $("loginError").textContent = err.message; }
 });
 
@@ -296,20 +352,48 @@ function ctlMsg(text, ok) {
 /* ---------- settings ---------- */
 async function loadSettings() {
   try {
+    const env = await (await api("/api/environments")).json();
+    environmentPresets = env.presets;
+    $("fEnvironment").replaceChildren(new Option("自定义配置 / 保留现有设置", "custom"));
+    environmentPresets.forEach(p => $("fEnvironment").add(new Option(p.label, p.id)));
     const r = await api("/api/settings");
     const j = await r.json();
-    if ($("fInstruments").value.trim() === "")
-      $("fInstruments").value = (j.instruments||[]).join(" ");
+    $("fInstruments").value = (j.instruments||[]).join(" ");
     $("fUser").value = j.user || "";
     $("fBroker").value = j.broker_id || "";
     $("fSource").value = j.source_kind || "simnow_test";
+    $("rSource").value = $("fSource").value;
     $("fPassword").value = "";
     $("fPassword").placeholder = (j.has_password ? "已保存（留空保持不变）" : "输入密码");
-    if (!$("fFronts").value.trim())
-      $("fFronts").value = (j.fronts && j.fronts.length ? j.fronts : j.yaml_fronts||[]).join("\n");
+    $("fFronts").value = (j.fronts && j.fronts.length ? j.fronts : j.yaml_fronts||[]).join("\n");
     $("fRemember").checked = !!j.remember;
-  } catch (e) { /* 401 handled in api() */ }
+    const match = environmentPresets.find(p => p.broker_id === j.broker_id &&
+      p.source_kind === j.source_kind && p.fronts.join("\n") === $("fFronts").value);
+    $("fEnvironment").value = match ? match.id : "custom";
+    environmentHint();
+  } catch (e) { ctlMsg(e.message, false); }
 }
+
+function environmentHint() {
+  const p = environmentPresets.find(p => p.id === $("fEnvironment").value);
+  $("environmentHint").textContent = p ? p.hours :
+    "自定义配置：请填写获授权的官方行情前置，并选择对应来源。保存后才会生效。";
+  $("fSource").disabled = !!p || !!(state?.manager?.running || state?.manager?.stopping);
+}
+function applyEnvironment() {
+  const p = environmentPresets.find(p => p.id === $("fEnvironment").value);
+  if (p) {
+    $("fFronts").value = p.fronts.join("\n");
+    $("fBroker").value = p.broker_id;
+    $("fSource").value = p.source_kind;
+  }
+  environmentHint();
+  ctlMsg("配置已修改，请保存设置；账号密码保持不变");
+}
+["fFronts", "fBroker"].forEach(id => $(id).addEventListener("input", () => {
+  $("fEnvironment").value = "custom";
+  environmentHint();
+}));
 
 function settingsBody() {
   const body = {instruments: $("fInstruments").value, user: $("fUser").value,
@@ -411,6 +495,97 @@ async function clearMonitorSecret() {
   } catch (e) { monMsg(e.message, false); }
 }
 
+/* ---------- private briefing and report downloads ---------- */
+function reportMessage(text, failed=false) {
+  $("reportMsg").textContent = text;
+  $("reportMsg").className = failed ? "fail" : "muted";
+}
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+async function generateBriefing() {
+  $("btnBriefing").disabled = true;
+  try {
+    const data = await (await api("/api/briefing")).json();
+    briefingContent = data.text;
+    $("briefingText").textContent = briefingContent;
+    $("briefingText").hidden = false;
+    $("btnDownloadBriefing").disabled = false;
+    reportMessage("运行简报已生成，可下载保存");
+  } catch (e) { reportMessage(e.message, true); }
+  finally { $("btnBriefing").disabled = false; }
+}
+function downloadBriefing() {
+  if (briefingContent) saveBlob(new Blob(["\ufeff", briefingContent], {type:"text/plain;charset=utf-8"}), "tickcorn-briefing.txt");
+}
+function reportButtons() {
+  const mgr = state?.manager || {};
+  $("btnGenerateReport").disabled = !!(mgr.running || mgr.stopping || mgr.report_running || reportBusy || !$("rPartition").value);
+}
+$("rPartition").addEventListener("change", reportButtons);
+async function loadReports() {
+  try {
+    const data = await (await api("/api/reports")).json();
+    reportPartitions = data.partitions;
+    const selected = $("rPartition").value;
+    $("rPartition").replaceChildren(new Option("请选择已采集数据", ""));
+    reportPartitions.forEach(p => {
+      const opt = new Option(`${p.instrument} / ${p.day}${p.staging ? "（待归档）" : ""}`, `${p.instrument}/${p.day}`);
+      opt.disabled = p.staging;
+      $("rPartition").add(opt);
+    });
+    if (Array.from($("rPartition").options).some(o => o.value === selected && !o.disabled)) $("rPartition").value = selected;
+    reportBusy = data.jobs.some(j => j.status === "running");
+    $("reportList").replaceChildren();
+    const labels = {running:"生成中", ready:"已完成", failed:"生成失败", interrupted:"生成中断"};
+    for (const job of data.jobs) {
+      const item = document.createElement("div"); item.className = "report-item";
+      const title = document.createElement("div");
+      title.textContent = `${job.instrument} · ${job.day} · ${job.source === "simnow_standard" ? "标准仿真" : "API 测试"} · ${labels[job.status] || job.status} · ${job.created_at}`;
+      item.appendChild(title);
+      if (job.error) { const error = document.createElement("p"); error.className = "fail"; error.textContent = job.error; item.appendChild(error); }
+      if (job.status === "ready") {
+        const buttons = document.createElement("div"); buttons.className = "btns";
+        for (const [label, kind, preview] of [["在线查看", "html", true], ["下载 HTML", "html", false], ["下载完整 ZIP", "zip", false]]) {
+          const button = document.createElement("button"); button.className = "ghost"; button.textContent = label;
+          button.onclick = () => fetchReport(job.id, kind, preview); buttons.appendChild(button);
+        }
+        item.appendChild(buttons);
+      }
+      $("reportList").appendChild(item);
+    }
+    if (!data.jobs.length) $("reportList").textContent = "尚无网页生成的分析报告。";
+    reportButtons();
+  } catch(e) { reportMessage(e.message, true); }
+}
+async function generateReport() {
+  const partition = reportPartitions.find(p => `${p.instrument}/${p.day}` === $("rPartition").value);
+  if (!partition) return;
+  reportBusy = true; reportButtons();
+  try {
+    await api("/api/reports", {method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({instrument:partition.instrument, day:partition.day, source:$("rSource").value})});
+    reportMessage("正在生成分析报告，完成后下方会出现查看和下载按钮");
+    await loadReports();
+  } catch(e) { reportBusy = false; reportButtons(); reportMessage(e.message, true); }
+}
+async function fetchReport(id, kind, preview) {
+  try {
+    const response = await api(`/api/reports/${id}/${kind}`);
+    if (preview) {
+      $("reportFrame").srcdoc = await response.text();
+      $("reportDialog").showModal();
+    } else { saveBlob(await response.blob(), `${id}.${kind}`); }
+  } catch(e) { reportMessage(e.message, true); }
+}
+function closeReport() {
+  $("reportDialog").close(); $("reportFrame").srcdoc = "";
+}
+
 /* ---------- live polling ---------- */
 async function tick() {
   try {
@@ -419,6 +594,9 @@ async function tick() {
     state = await r.json();
     $("err").style.display = "none";
     render();
+    if (Date.now() - reportRefreshAt > 5000) {
+      reportRefreshAt = Date.now(); await loadReports();
+    }
   } catch (e) {
     $("err").textContent = "无法连接服务 (" + e + ")。";
     $("err").style.display = "block";
@@ -429,8 +607,11 @@ async function tick() {
 function render() {
   const mgr = state.manager || {};
   const running = !!mgr.running;
-  $("btnStart").disabled = running || !!mgr.stopping;
+  $("btnStart").disabled = running || !!mgr.stopping || !!mgr.report_running || reportBusy;
   $("btnStop").disabled = !running || !!mgr.stopping;
+  for (const id of ["fEnvironment", "fInstruments", "fUser", "fPassword", "fBroker", "fFronts", "fRemember", "btnSaveSettings", "btnForget"]) $(id).disabled = running || !!mgr.stopping;
+  environmentHint();
+  reportButtons();
   $("mgrStatus").textContent =
       (running ? `运行中 · batch ${mgr.batch_id||""} · ${new Date().toLocaleTimeString()}` :
                  (mgr.stopping ? "正在停止并保存数据" : (mgr.error ? "错误: " + mgr.error : "空闲")))
@@ -581,6 +762,7 @@ window.addEventListener("resize", () => state && render());
     await api("/api/state"); authenticated = true;
     $("workspace").hidden = false; await loadSettings();
     await loadMonitor();
+    await loadReports();
   } catch(e) { showLogin(); }
   tick();
 })();

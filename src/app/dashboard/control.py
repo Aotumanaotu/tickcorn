@@ -28,6 +28,8 @@ from app.common.exceptions import AppError
 from app.common.private_files import write_private_json
 from app.common.logging import get_logger
 from app.dashboard.monitor_settings import MonitorSettingsStore, apply_payload
+from app.dashboard.environments import validate_source
+from app.dashboard.reports import ReportStore
 
 logger = get_logger("dashboard.control")
 
@@ -110,6 +112,7 @@ class CollectorManager:
         self._thread: Optional[threading.Thread] = None
         self._error: str = ""
         self._started_at: Optional[str] = None
+        self.reports = ReportStore(config)
 
     # ------------------------------------------------------------------
     @property
@@ -128,6 +131,7 @@ class CollectorManager:
                 if self._service else [],
                 "started_at": self._started_at,
                 "error": self._error,
+                "report_running": self.reports.busy,
             }
 
     def get_live_state(self):
@@ -184,6 +188,7 @@ class CollectorManager:
                     raise AppError("账号、密码或 BrokerID 超出 CTP 字段长度或包含控制字符")
             if s.source_kind not in ("simnow_test", "simnow_standard"):
                 raise AppError("请选择 SimNow 测试或标准环境")
+            validate_source(s.fronts, s.source_kind)
             if "remember" in payload:
                 if not isinstance(payload["remember"], bool):
                     raise AppError("记住账号密码应为布尔值")
@@ -216,14 +221,23 @@ class CollectorManager:
             return {"test_request": updated.test_request}
 
     # ------------------------------------------------------------------
+    def create_report(self, payload):
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                raise AppError("请先停止采集并等待保存完成，再生成分析报告")
+            return self.reports.start(payload)
+
     def start(self) -> dict[str, Any]:
         with self._lock:
+            if self.reports.busy:
+                raise AppError("报告正在生成，请完成后再开始采集")
             if self.running:
                 raise AppError("采集已在运行中")
             if self._thread is not None and self._thread.is_alive():
                 raise AppError("上一个采集线程尚未退出，请稍候")
 
             s = self.settings
+            validate_source(s.fronts, s.source_kind)
             missing = []
             if not s.instruments:
                 missing.append("合约")

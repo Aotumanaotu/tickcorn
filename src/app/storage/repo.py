@@ -81,7 +81,7 @@ class StorageRepository:
     # ------------------------------------------------------------------
     def load_clean(self, instrument_id: str, trading_day: str,
                    tick_size: Optional[float] = None,
-                   use_cache: bool = True) -> CleanResult:
+                   use_cache: bool = True, raw_source: Optional[str] = None) -> CleanResult:
         key = PartitionKey(instrument_id, trading_day)
         tick = tick_size if tick_size is not None else self.config.resolve_tick_size(
             instrument_id)
@@ -92,6 +92,8 @@ class StorageRepository:
         if any(self.store.staging_dir(key).glob("part-*.parquet")):
             use_cache = False
         param_sig = f"v3-tick{tick}"
+        if raw_source:
+            param_sig += "-source" + hashlib.sha256(raw_source.encode()).hexdigest()[:16]
         cache_path = cache_dir / f"clean-{raw_sig}-{param_sig}.parquet"
         stats_path = cache_dir / f"clean-{raw_sig}-{param_sig}.json"
 
@@ -102,6 +104,8 @@ class StorageRepository:
 
         table = self.load_raw_table(key)
         df = table.to_pandas()
+        if raw_source:
+            df = df.loc[df["raw_source"] == raw_source].copy()
         result = build_clean_dataframe(df, tick_size=tick)
 
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -110,11 +114,13 @@ class StorageRepository:
         return result
 
     def load_clean_range(self, instrument_id: str, days: list[str],
-                         tick_size: Optional[float] = None) -> CleanResult:
+                         tick_size: Optional[float] = None,
+                         raw_source: Optional[str] = None) -> CleanResult:
         dfs, stats = [], {"dropped_duplicates": 0, "dropped_invalid": 0,
                           "days": {}}
         for day in days:
-            r = self.load_clean(instrument_id, day, tick_size=tick_size)
+            r = self.load_clean(instrument_id, day, tick_size=tick_size,
+                                raw_source=raw_source)
             dfs.append(r.df)
             stats["dropped_duplicates"] += r.dropped_duplicates
             stats["dropped_invalid"] += r.dropped_invalid

@@ -69,6 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ---------------- analyze ----------------
     c = sub.add_parser("analyze", help="run the Phase-1 analysis pipeline")
+    c.add_argument("--source", choices=["simnow_test", "simnow_standard"],
+                   help="only analyze snapshots from this configured source")
     c.add_argument("--instrument", "-i", required=True)
     c.add_argument("--date", default=None, help="single trading day YYYY-MM-DD")
     c.add_argument("--from", dest="from_day", default=None)
@@ -301,6 +303,7 @@ def cmd_analyze(args) -> int:
     available = repo.list_days(args.instrument)
     days = _resolve_days(args, available)
     options = AnalysisOptions(
+        raw_source="ctp:" + args.source if args.source else None,
         strict=not args.loose,
         mid_tolerance_ticks=config.classifier.mid_tolerance_ticks,
         lookbacks=tuple(config.analysis.lookbacks),
