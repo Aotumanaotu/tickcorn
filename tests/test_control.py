@@ -15,6 +15,7 @@ import pytest
 from app.common.config import load_config
 from app.collector.live import LiveState
 from app.dashboard.control import CollectorManager, SettingsStore
+from app.dashboard.monitor_settings import MonitorSettingsStore, apply_payload
 from app.dashboard.server import DashboardServer
 from conftest import ROOT
 
@@ -57,6 +58,64 @@ def test_settings_store_permissions_and_persistence(env):
 
     # masked() never exposes the password
     assert "secret" not in json.dumps(loaded.masked())
+
+
+def test_monitor_settings_store_and_masking(tmp_path):
+    store = MonitorSettingsStore(tmp_path)
+    s = store.load()
+    apply_payload(s, {
+        "enabled": True,
+        "feishu_app_id": "cli_xxx",
+        "feishu_app_secret": "s3cr3t-value",
+        "feishu_receive_id": "oc_1",
+        "report_times": "21:00, 08:00",
+        "title": "测试简报",
+    })
+    store.save(s)
+    raw = json.loads(store.path.read_text())
+    assert raw["enabled"] is True
+    assert raw["report_times"] == ["08:00", "21:00"]
+    assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
+
+    loaded = store.load()
+    assert loaded.feishu_app_secret == "s3cr3t-value"
+    assert "s3cr3t-value" not in json.dumps(loaded.masked())
+    # empty secret keeps the stored one
+    apply_payload(loaded, {"feishu_app_secret": ""})
+    assert loaded.feishu_app_secret == "s3cr3t-value"
+    # explicit clear
+    apply_payload(loaded, {"clear_secret": True})
+    assert loaded.feishu_app_secret == ""
+
+    with pytest.raises(Exception):
+        apply_payload(MonitorSettingsStore(tmp_path).load(), {"report_times": "25:00"})
+    with pytest.raises(Exception):
+        apply_payload(MonitorSettingsStore(tmp_path).load(), {"feishu_receive_id_type": "bogus"})
+
+
+def test_manager_monitor_api(env):
+    config, manager, tmp_path = env
+    server, port = _serve(config, manager, token=None)
+    try:
+        code, s = _req(f"http://127.0.0.1:{port}/api/monitor")
+        assert code == 200 and "has_secret" in s and s["has_secret"] is False
+
+        code, s = _req(f"http://127.0.0.1:{port}/api/monitor", "POST", {
+            "enabled": True, "feishu_app_id": "cli_x",
+            "feishu_app_secret": "s3cr3t-value", "feishu_receive_id": "oc_x",
+            "feishu_receive_id_type": "chat_id", "report_times": "06:00,07:00"})
+        assert s["has_secret"] is True
+        assert s["feishu_app_secret"] == "********"
+        assert s["report_times"] == ["06:00", "07:00"]
+
+        code, t = _req(f"http://127.0.0.1:{port}/api/monitor/test", "POST", {})
+        assert t["test_request"] == 1
+
+        with pytest.raises(urllib.error.HTTPError):
+            _req(f"http://127.0.0.1:{port}/api/monitor", "POST",
+                 {"report_times": "25:00"})
+    finally:
+        server.shutdown()
 
 
 def test_manager_update_settings(env):

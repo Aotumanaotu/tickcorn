@@ -82,3 +82,7 @@ docker compose cp corn-tick:/app/data/metadata.db ./data/backup/metadata.db
 - 大范围分析：停止采集后执行，提前检查内存；采集落盘可流式处理，分析仍需把选定数据加载到内存。
 
 Docker 的停止宽限期为 120 秒；见 [Compose 服务配置](https://docs.docker.com/reference/compose-file/services/)。数据极大导致停止超时，应扩大本地部署覆盖配置并重新验收，勿直接强杀后假定数据完整。
+
+## 监控与每日简报
+
+`ops/monitor/` 提供一个独立的 Node 服务，定时检查面板可用性、采集运行状态、行情连接、当日数据量与磁盘，并通过飞书官方机器人 SDK 每天推送简报。它挂在 Compose 的 `monitor` profile 下，普通 `docker compose up` 不会启动。飞书凭证、发送时间等直接在网页控制台的“每日简报”里填写（存放在数据卷本地受限文件，monitor 自动重读，无需重启或改 `.env`）。配置与启动步骤见 [ops/monitor/README.md](../ops/monitor/README.md)。该服务只读，不会自动重启采集。

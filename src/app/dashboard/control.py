@@ -27,6 +27,7 @@ from app.common.config import AppConfig
 from app.common.exceptions import AppError
 from app.common.private_files import write_private_json
 from app.common.logging import get_logger
+from app.dashboard.monitor_settings import MonitorSettingsStore, apply_payload
 
 logger = get_logger("dashboard.control")
 
@@ -100,6 +101,9 @@ class CollectorManager:
         self.settings = self.settings_store.load()
         if not self.settings.fronts:
             self.settings.fronts = list(config.ctp.fronts)
+
+        self.monitor_store = MonitorSettingsStore(config.paths.data_dir)
+        self.monitor = self.monitor_store.load()
 
         self._lock = threading.RLock()
         self._service: Optional[Any] = None
@@ -188,6 +192,28 @@ class CollectorManager:
             self.settings_store.save(s)
             self.settings = s
             return s.masked()
+
+    # ------------------------------------------------------------------
+    def monitor_settings_masked(self) -> dict[str, Any]:
+        with self._lock:
+            return self.monitor.masked()
+
+    def update_monitor_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate before replacing; empty App Secret keeps the stored one."""
+        with self._lock:
+            updated = apply_payload(dataclasses.replace(self.monitor), payload)
+            self.monitor_store.save(updated)
+            self.monitor = updated
+            return updated.masked()
+
+    def request_monitor_test(self) -> dict[str, Any]:
+        """Bump the test counter the monitor container polls."""
+        with self._lock:
+            updated = dataclasses.replace(
+                self.monitor, test_request=self.monitor.test_request + 1)
+            self.monitor_store.save(updated)
+            self.monitor = updated
+            return {"test_request": updated.test_request}
 
     # ------------------------------------------------------------------
     def start(self) -> dict[str, Any]:

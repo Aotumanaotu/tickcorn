@@ -45,3 +45,7 @@ samples/synthetic_demo/*
 # Local browser verification artifacts
 .playwright-cli/
 output/
+
+# Monitor (Node) local installs and logs
+ops/monitor/node_modules/
+ops/monitor/*.log

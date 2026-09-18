@@ -139,6 +139,56 @@
     </div>
   </div>
 
+  <!-- ================= 每日简报 ================= -->
+  <div class="panel c12">
+    <h2>每日简报（飞书机器人）</h2>
+    <div class="form-grid">
+      <div>
+        <label for="mAppId">飞书应用 App ID</label>
+        <input type="text" id="mAppId" autocomplete="off" placeholder="cli_...">
+      </div>
+      <div>
+        <label for="mAppSecret">App Secret（留空 = 保持当前）</label>
+        <input type="password" id="mAppSecret" autocomplete="new-password" placeholder="••••••••">
+      </div>
+      <div>
+        <label for="mReceiveType">接收方类型</label>
+        <select id="mReceiveType">
+          <option value="chat_id">群聊 chat_id</option>
+          <option value="open_id">用户 open_id</option>
+          <option value="user_id">用户 user_id</option>
+          <option value="union_id">用户 union_id</option>
+          <option value="email">邮箱</option>
+        </select>
+      </div>
+      <div>
+        <label for="mReceive">接收方 ID（chat_id / open_id / 邮箱）</label>
+        <input type="text" id="mReceive" autocomplete="off" placeholder="oc_... 或邮箱">
+      </div>
+      <div>
+        <label for="mTimes">每天发送时间（HH:MM，逗号分隔）</label>
+        <input type="text" id="mTimes" placeholder="08:00,12:30,21:30">
+      </div>
+      <div>
+        <label for="mTitle">简报标题</label>
+        <input type="text" id="mTitle" placeholder="玉米快照采集">
+      </div>
+      <div class="wide chk">
+        <input type="checkbox" id="mEnabled">
+        <label for="mEnabled" style="margin:0">启用简报</label>
+        <input type="checkbox" id="mAlertOnly">
+        <label for="mAlertOnly" style="margin:0">仅异常时发送</label>
+        <span id="monMsg"></span>
+      </div>
+    </div>
+    <p class="muted">需先在服务器启用 monitor 容器（<code>docker compose --profile monitor up -d monitor</code>）。凭证以明文保存在服务器本地受限文件中。</p>
+    <div class="btns">
+      <button class="ghost" onclick="saveMonitor()">保存简报设置</button>
+      <button class="ghost" onclick="testMonitor()">发送测试消息</button>
+      <button class="ghost" onclick="clearMonitorSecret()">清除 App Secret</button>
+    </div>
+  </div>
+
   <!-- ================= 实时监控 ================= -->
   <div class="panel c3">
     <h2>盘口 Bid/Ask</h2>
@@ -224,6 +274,7 @@ $("loginForm").addEventListener("submit", async e => {
     $("loginPanel").hidden = true;
     $("workspace").hidden = false;
     await loadSettings();
+    await loadMonitor();
   } catch (err) { $("loginError").textContent = err.message; }
 });
 
@@ -298,6 +349,66 @@ async function forgetCredentials() {
       body:JSON.stringify({user:"", clear_password:true, remember:false})});
     await loadSettings(); ctlMsg("账号密码已清除", true);
   } catch(e) { ctlMsg(e.message, false); }
+}
+
+/* ---------- monitor / Feishu briefing ---------- */
+function monMsg(text, ok) {
+  $("monMsg").textContent = text || "";
+  $("monMsg").className = ok === undefined ? "muted" : (ok ? "ok" : "fail");
+}
+async function loadMonitor() {
+  try {
+    const r = await api("/api/monitor");
+    const j = await r.json();
+    $("mEnabled").checked = !!j.enabled;
+    $("mAlertOnly").checked = !!j.alert_only;
+    $("mAppId").value = j.feishu_app_id || "";
+    $("mReceive").value = j.feishu_receive_id || "";
+    $("mReceiveType").value = j.feishu_receive_id_type || "chat_id";
+    $("mTimes").value = (j.report_times || []).join(",");
+    $("mTitle").value = j.title || "";
+    $("mAppSecret").value = "";
+    $("mAppSecret").placeholder = j.has_secret ? "已保存（留空保持不变）" : "••••••••";
+  } catch (e) { /* 401 handled in api() */ }
+}
+function monitorBody() {
+  const body = {
+    enabled: $("mEnabled").checked,
+    alert_only: $("mAlertOnly").checked,
+    feishu_app_id: $("mAppId").value,
+    feishu_receive_id: $("mReceive").value,
+    feishu_receive_id_type: $("mReceiveType").value,
+    report_times: $("mTimes").value,
+    title: $("mTitle").value,
+  };
+  if ($("mAppSecret").value) body.feishu_app_secret = $("mAppSecret").value;
+  return body;
+}
+async function persistMonitor() {
+  const r = await api("/api/monitor", {method:"POST",
+    headers:{"Content-Type":"application/json"}, body:JSON.stringify(monitorBody())});
+  const j = await r.json();
+  $("mAppSecret").value = "";
+  $("mAppSecret").placeholder = j.has_secret ? "已保存（留空保持不变）" : "••••••••";
+  return j;
+}
+async function saveMonitor() {
+  try { await persistMonitor(); monMsg("简报设置已保存", true); }
+  catch (e) { monMsg(e.message, false); }
+}
+async function testMonitor() {
+  try {
+    await persistMonitor();
+    await api("/api/monitor/test", {method:"POST"});
+    monMsg("测试请求已发送，monitor 容器约 20 秒内推送", true);
+  } catch (e) { monMsg(e.message, false); }
+}
+async function clearMonitorSecret() {
+  try {
+    await api("/api/monitor", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({clear_secret: true})});
+    await loadMonitor(); monMsg("App Secret 已清除", true);
+  } catch (e) { monMsg(e.message, false); }
 }
 
 /* ---------- live polling ---------- */
@@ -469,6 +580,7 @@ window.addEventListener("resize", () => state && render());
   try {
     await api("/api/state"); authenticated = true;
     $("workspace").hidden = false; await loadSettings();
+    await loadMonitor();
   } catch(e) { showLogin(); }
   tick();
 })();

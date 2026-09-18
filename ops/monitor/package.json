@@ -1,0 +1,19 @@
+{
+  "name": "corn-tick-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Daily briefing / health monitor for the corn-tick collector, delivered via the official Feishu (Lark) bot SDK.",
+  "type": "module",
+  "engines": {
+    "node": ">=18.15"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node src/index.js --check",
+    "once": "node src/index.js --once",
+    "dry-run": "node src/index.js --once --dry-run"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.74.0"
+  }
+}

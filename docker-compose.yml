@@ -21,5 +21,41 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  # 每日简报 / 健康监控。默认不随 `docker compose up` 启动，需显式启用：
+  #   docker compose --profile monitor up -d monitor
+  # 飞书凭证、发送时间等在网页面板“每日简报”里填写（写入数据卷，
+  # monitor 自动重读，无需重启）；ops/monitor/.env 仅作无面板部署的回退。
+  monitor:
+    build: ./ops/monitor
+    profiles: ["monitor"]
+    depends_on:
+      - corn-tick
+    environment:
+      TZ: Asia/Shanghai
+      DASHBOARD_URL: http://corn-tick:8800
+      DATA_DIR: /data
+      DASHBOARD_TOKEN_FILE: /data/dashboard-token.local.json
+      REPORT_TIMES: "08:00,12:30,21:30"
+    env_file:
+      - path: ./ops/monitor/.env
+        required: false
+    user: "10001:10001"
+    volumes:
+      - corn-data:/data:ro
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   corn-data:

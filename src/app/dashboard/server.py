@@ -115,6 +115,8 @@ class DashboardServer:
                     resp["yaml_fronts"] = list(outer.config_fronts())
                     resp["running"] = outer.manager.running
                     return self._json(resp)
+                if path == "/api/monitor" and outer.manager is not None:
+                    return self._json(outer.manager.monitor_settings_masked())
                 if path in ("/", "/index.html"):
                     html = (outer._static_dir / "index.html").read_text(
                         encoding="utf-8").replace("__REFRESH_MS__",
@@ -144,6 +146,10 @@ class DashboardServer:
                     body = self._read_json()
                     if path == "/api/settings":
                         return self._json(outer.manager.update_settings(body))
+                    if path == "/api/monitor":
+                        return self._json(outer.manager.update_monitor_settings(body))
+                    if path == "/api/monitor/test":
+                        return self._json(outer.manager.request_monitor_test())
                     if path == "/api/collect/start":
                         return self._json(outer.manager.start())
                     if path == "/api/collect/stop":
