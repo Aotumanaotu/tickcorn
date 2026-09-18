@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>玉米期货 1-Tick 微观结构 · 控制与实时面板</title>
+<style>
+  :root { --bg:#0e1720; --panel:#16222e; --line:#24374a; --txt:#dce7f2;
+          --muted:#7f95ab; --up:#e05d5d; --down:#5da2e0; --acc:#4cc38a; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--txt); margin: 0;
+         font: 13px/1.45 -apple-system,"Segoe UI","Noto Sans CJK SC",monospace; }
+  header { display:flex; align-items:center; gap:16px; padding: 10px 18px;
+           border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight:600; }
+  .pill { padding: 3px 10px; border-radius: 12px; font-size: 11px;
+          background: var(--panel); border: 1px solid var(--line); }
+  .pill.ok { color: var(--acc); border-color: var(--acc); }
+  .pill.bad { color: var(--up); border-color: var(--up); }
+  .muted { color: var(--muted); }
+  main { padding: 14px 18px; display: grid; gap: 14px;
+         grid-template-columns: repeat(12, 1fr); }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 10px; padding: 12px 14px; }
+  .c3 { grid-column: span 3; } .c4 { grid-column: span 4; }
+  .c5 { grid-column: span 5; } .c6 { grid-column: span 6; }
+  .c7 { grid-column: span 7; } .c8 { grid-column: span 8; }
+  .c12 { grid-column: span 12; }
+  h2 { font-size: 12px; margin: 0 0 8px; color: var(--muted);
+       font-weight: 600; letter-spacing: .4px; text-transform: uppercase; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 3px 6px; text-align: right; }
+  th { color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--line); }
+  td:first-child, th:first-child { text-align: left; }
+  .num { font-variant-numeric: tabular-nums; }
+  .pos { color: var(--up); } .neg { color: var(--down); }
+  canvas { width: 100%; display:block; }
+  .big { font-size: 26px; font-weight: 700; }
+  .row { display:flex; justify-content: space-between; padding: 2px 0; }
+  .ratio { height: 14px; background:#1d2c3b; border-radius: 7px; overflow:hidden;
+           display:flex; margin: 6px 0; }
+  .ratio div { height: 100%; }
+  #err { color: var(--up); padding: 8px 18px; display:none; white-space: pre-wrap; }
+  .inst-tabs { display:flex; gap:6px; }
+  .inst-tabs button { background:var(--panel); color:var(--txt);
+    border:1px solid var(--line); border-radius:6px; padding:4px 12px;
+    cursor:pointer; font-size:12px; }
+  .inst-tabs button.active { border-color: var(--acc); color: var(--acc); }
+  /* ---------- control form ---------- */
+  .form-grid { display:grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+  .form-grid .wide { grid-column: 1 / -1; }
+  label { display:block; font-size:11px; color:var(--muted); margin: 6px 0 2px; }
+  input[type=text], input[type=password], textarea {
+    width:100%; background:#0d1720; color:var(--txt); border:1px solid var(--line);
+    border-radius:6px; padding:6px 8px; font:inherit; }
+  textarea { min-height: 66px; resize: vertical; }
+  input:focus, textarea:focus { outline:1px solid var(--acc); }
+  .btns { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  button.primary { background:var(--acc); color:#08281a; border:0; border-radius:6px;
+    padding:8px 18px; font-weight:700; cursor:pointer; font-size:13px; }
+  button.danger { background:transparent; color:var(--up); border:1px solid var(--up);
+    border-radius:6px; padding:8px 18px; cursor:pointer; font-size:13px; }
+  button.ghost { background:transparent; color:var(--txt); border:1px solid var(--line);
+    border-radius:6px; padding:8px 14px; cursor:pointer; font-size:13px; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .chk { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--muted); }
+  #ctlMsg { font-size:12px; margin-left:8px; }
+  .ok { color: var(--acc); } .fail { color: var(--up); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌽 玉米期货 1-Tick 微观结构 · 控制台</h1>
+  <span class="pill" id="conn">…</span>
+  <span class="pill muted" id="meta">CTP Market Snapshot</span>
+  <span class="pill muted" id="rate">– msg/min</span>
+  <div class="inst-tabs" id="tabs"></div>
+</header>
+<div id="err"></div>
+<main>
+  <!-- ================= 采集控制 ================= -->
+  <div class="panel c12">
+    <h2>采集控制（SimNow）· 账号仅保存在服务器本地文件（0600 权限），不会进入 git/日志</h2>
+    <div class="form-grid">
+      <div>
+        <label>合约（空格或逗号分隔，如 C2701 C2705）</label>
+        <input type="text" id="fInstruments" placeholder="C2701">
+      </div>
+      <div>
+        <label>SimNow 账号</label>
+        <input type="text" id="fUser" autocomplete="off" placeholder="手机号">
+      </div>
+      <div>
+        <label>密码（留空 = 保持已保存的密码）</label>
+        <input type="password" id="fPassword" autocomplete="new-password" placeholder="••••••••">
+      </div>
+      <div class="wide">
+        <label>行情前置地址（每行一个 tcp://IP:PORT；已预填，可从 simnow.com.cn 获取最新）</label>
+        <textarea id="fFronts" spellcheck="false"></textarea>
+      </div>
+      <div class="wide chk">
+        <input type="checkbox" id="fRemember">
+        <label for="fRemember" style="margin:0">在服务器上记住账号密码（data/settings.local.json，0600；不勾选则仅存内存，重启后需重输）</label>
+        <span id="ctlMsg"></span>
+      </div>
+    </div>
+    <div class="btns">
+      <button class="ghost" onclick="saveSettings()">保存设置</button>
+      <button class="primary" id="btnStart" onclick="startCollect()">▶ 开始采集</button>
+      <button class="danger" id="btnStop" onclick="stopCollect()">■ 停止采集</button>
+      <span class="muted" id="mgrStatus"></span>
+    </div>
+  </div>
+
+  <!-- ================= 实时监控 ================= -->
+  <div class="panel c3">
+    <h2>盘口 Bid/Ask</h2>
+    <div class="row"><span class="muted">Ask1</span><span class="num neg" id="ask1">–</span></div>
+    <div class="row"><span class="muted">Bid1</span><span class="num pos" id="bid1">–</span></div>
+    <div class="row"><span class="muted">Last</span><span class="big" id="last">–</span></div>
+    <div class="row"><span class="muted">Mid</span><span class="num" id="mid">–</span></div>
+    <div class="row"><span class="muted">Spread</span><span class="num" id="spread">–</span></div>
+    <div class="row"><span class="muted">OBI1</span><span class="num" id="obi">–</span></div>
+    <div class="row"><span class="muted">Microprice</span><span class="num" id="micro">–</span></div>
+    <div class="row"><span class="muted">Volume / OI</span><span class="num" id="vol">–</span></div>
+  </div>
+
+  <div class="panel c5">
+    <h2>价格与盘口（最近快照）</h2>
+    <canvas id="cPrice" height="180"></canvas>
+  </div>
+
+  <div class="panel c4">
+    <h2>今日跳点分类</h2>
+    <div id="counts"></div>
+    <h2 style="margin-top:12px">1-Tick 跳动构成</h2>
+    <div class="ratio" id="ratioBar"></div>
+    <div class="row"><span class="muted">Bounce Ratio</span>
+      <span class="num" id="bounceRatio">–</span></div>
+    <div class="row"><span class="muted">Genuine Move Ratio</span>
+      <span class="num" id="genuineRatio">–</span></div>
+  </div>
+
+  <div class="panel c7">
+    <h2>OBI(1) 与 Spread</h2>
+    <canvas id="cObi" height="140"></canvas>
+  </div>
+
+  <div class="panel c5">
+    <h2>最近事件</h2>
+    <table id="events"><thead><tr>
+      <th>时间</th><th>标签</th><th>方向</th><th>db</th><th>da</th><th>dl</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+</main>
+<script>
+const REFRESH_MS = __REFRESH_MS__;
+let state = null, curInst = null;
+
+const $ = id => document.getElementById(id);
+const fmt = (v, d=2) => (v===null||v===undefined||Number.isNaN(v)) ? "–" :
+      Number(v).toLocaleString(undefined,{minimumFractionDigits:d, maximumFractionDigits:d});
+const timeStr = ns => { const d = new Date(Number(ns)/1e9*1000); return d.toTimeString().slice(0,8); };
+
+/* ---------- token handling ---------- */
+function getToken() {
+  const m = location.search.match(/token=([^&]+)/);
+  if (m) { localStorage.setItem("dashToken", decodeURIComponent(m[1])); history.replaceState(null,"",location.pathname); }
+  return localStorage.getItem("dashToken") || "";
+}
+async function api(path, opts={}) {
+  opts.headers = Object.assign({"X-Auth-Token": getToken()}, opts.headers||{});
+  const r = await fetch(path, Object.assign({cache:"no-store"}, opts));
+  if (r.status === 401) {
+    const t = prompt("访问令牌错误或缺失，请输入 token:");
+    if (t) { localStorage.setItem("dashToken", t); return api(path, opts); }
+    throw new Error("unauthorized");
+  }
+  return r;
+}
+
+function labelColor(l) {
+  if (!l) return "#43596e";
+  if (l.startsWith("GENUINE_QUOTE_MOVE_UP")) return "#e05d5d";
+  if (l.startsWith("GENUINE_QUOTE_MOVE_DOWN")) return "#5da2e0";
+  if (l.startsWith("HIGH_CONFIDENCE_BOUNCE")) return "#c9a227";
+  if (l.startsWith("LIKELY_BOUNCE")) return "#8a7f4f";
+  if (l === "AMBIGUOUS") return "#7f95ab";
+  return "#43596e";
+}
+
+function ctlMsg(text, ok) {
+  $("ctlMsg").textContent = text || "";
+  $("ctlMsg").className = ok === undefined ? "" : (ok ? "ok" : "fail");
+}
+
+/* ---------- settings ---------- */
+async function loadSettings() {
+  try {
+    const r = await api("/api/settings");
+    const j = await r.json();
+    if ($("fInstruments").value.trim() === "")
+      $("fInstruments").value = (j.instruments||[]).join(" ");
+    $("fUser").value = j.user || "";
+    $("fPassword").value = "";
+    $("fPassword").placeholder = (j.has_password ? "已保存（留空保持不变）" : "输入密码");
+    if (!$("fFronts").value.trim())
+      $("fFronts").value = (j.fronts && j.fronts.length ? j.fronts : j.yaml_fronts||[]).join("\n");
+    $("fRemember").checked = !!j.remember;
+  } catch (e) { /* 401 handled in api() */ }
+}
+
+async function saveSettings() {
+  const body = {
+    instruments: $("fInstruments").value,
+    user: $("fUser").value,
+    fronts: $("fFronts").value,
+    remember: $("fRemember").checked,
+  };
+  if ($("fPassword").value) body.password = $("fPassword").value;
+  const r = await api("/api/settings", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)});
+  const j = await r.json();
+  if (j.error) return ctlMsg("保存失败: " + j.error, false);
+  $("fPassword").value = "";
+  $("fPassword").placeholder = (j.has_password ? "已保存（留空保持不变）" : "输入密码");
+  ctlMsg("已保存 ✓", true);
+}
+
+async function startCollect() {
+  ctlMsg("启动中...");
+  await saveSettingsQuiet();
+  const r = await api("/api/collect/start", {method: "POST"});
+  const j = await r.json();
+  if (j.error) return ctlMsg("启动失败: " + j.error, false);
+  ctlMsg("采集已启动 ✓", true);
+}
+async function saveSettingsQuiet() {
+  const body = { instruments: $("fInstruments").value, user: $("fUser").value,
+                 fronts: $("fFronts").value, remember: $("fRemember").checked };
+  if ($("fPassword").value) body.password = $("fPassword").value;
+  try { await api("/api/settings", { method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}); } catch(e) {}
+}
+async function stopCollect() {
+  ctlMsg("停止中...");
+  const r = await api("/api/collect/stop", {method: "POST"});
+  const j = await r.json();
+  if (j.error) return ctlMsg("停止失败: " + j.error, false);
+  ctlMsg("已停止", true);
+}
+
+/* ---------- live polling ---------- */
+async function tick() {
+  try {
+    const r = await api("/api/state");
+    state = await r.json();
+    $("err").style.display = "none";
+    render();
+  } catch (e) {
+    $("err").textContent = "无法连接服务 (" + e + ")。";
+    $("err").style.display = "block";
+  }
+  setTimeout(tick, REFRESH_MS);
+}
+
+function render() {
+  const mgr = state.manager || {};
+  const running = !!mgr.running;
+  $("btnStart").disabled = running;
+  $("btnStop").disabled = !running;
+  $("mgrStatus").textContent =
+      (running ? `运行中 · batch ${mgr.batch_id||""} · ${new Date().toLocaleTimeString()}` :
+                 (mgr.error ? "错误: " + mgr.error : "空闲"))
+      + (mgr.instruments && mgr.instruments.length ? "" : "");
+
+  const conn = state.connection || {};
+  const c = $("conn");
+  c.textContent = (conn.status || "?") + (conn.detail ? " · " + conn.detail : "");
+  c.className = "pill " + (["connected","logged_in","replaying"].includes(conn.status) ? "ok" :
+                            (conn.status||"").includes("fail") ? "bad" : "");
+  $("meta").textContent = "batch " + (state.batch_id || mgr.batch_id || "–") +
+      (state.ctp_trading_day ? " · 交易日 " + state.ctp_trading_day : "") +
+      (state.api_version ? " · CTP " + state.api_version : "");
+
+  const insts = Object.keys(state.instruments || {});
+  if (!insts.length) { $("rate").textContent = "– msg/min"; return; }
+  if (!curInst || !insts.includes(curInst)) curInst = insts[0];
+  const tabs = $("tabs");
+  tabs.innerHTML = "";
+  insts.forEach(i => {
+    const b = document.createElement("button");
+    b.textContent = i; b.className = i === curInst ? "active" : "";
+    b.onclick = () => { curInst = i; };
+    tabs.appendChild(b);
+  });
+
+  const s = state.instruments[curInst];
+  const q = s.last || {};
+  $("rate").textContent = fmt(s.rate_per_min, 1) + " msg/min";
+  $("last").textContent = fmt(q.last_price, 1);
+  $("last").className = "big " + ((s.history.length>1 &&
+      s.history[s.history.length-1].last > s.history[s.history.length-2].last) ? "pos" :
+      (s.history.length>1 && s.history[s.history.length-1].last <
+       s.history[s.history.length-2].last ? "neg" : ""));
+  $("mid").textContent = fmt(q.mid_price, 1);
+  $("spread").textContent = fmt(q.spread, 1);
+  $("obi").textContent = fmt(q.obi1, 3);
+  $("micro").textContent = fmt(q.microprice, 1);
+  $("vol").textContent = fmt(q.volume, 0) + " / " + fmt(q.open_interest, 0);
+  $("ask1").innerHTML = `${fmt(q.ask_price1,1)} × ${fmt(q.ask_volume1,0)}`;
+  $("bid1").innerHTML = `${fmt(q.bid_price1,1)} × ${fmt(q.bid_volume1,0)}`;
+
+  const lc = s.label_counts || {};
+  const rows = [
+    ["HIGH_CONFIDENCE_BOUNCE ↑", lc.HIGH_CONFIDENCE_BOUNCE_UP || 0, "pos"],
+    ["HIGH_CONFIDENCE_BOUNCE ↓", lc.HIGH_CONFIDENCE_BOUNCE_DOWN || 0, "neg"],
+    ["LIKELY_BOUNCE ↑", lc.LIKELY_BOUNCE_UP || 0, "pos"],
+    ["LIKELY_BOUNCE ↓", lc.LIKELY_BOUNCE_DOWN || 0, "neg"],
+    ["GENUINE_QUOTE_MOVE ↑", lc.GENUINE_QUOTE_MOVE_UP || 0, "pos"],
+    ["GENUINE_QUOTE_MOVE ↓", lc.GENUINE_QUOTE_MOVE_DOWN || 0, "neg"],
+    ["AMBIGUOUS", lc.AMBIGUOUS || 0, ""],
+  ];
+  $("counts").innerHTML = rows.map(r =>
+    `<div class="row"><span class="muted">${r[0]}</span>
+     <span class="num ${r[2]}">${r[1].toLocaleString()}</span></div>`).join("");
+
+  const bounce = (lc.HIGH_CONFIDENCE_BOUNCE_UP||0)+(lc.HIGH_CONFIDENCE_BOUNCE_DOWN||0)
+               + (lc.LIKELY_BOUNCE_UP||0)+(lc.LIKELY_BOUNCE_DOWN||0);
+  const genuine = (lc.GENUINE_QUOTE_MOVE_UP||0)+(lc.GENUINE_QUOTE_MOVE_DOWN||0);
+  const amb = lc.AMBIGUOUS || 0;
+  const tot = bounce + genuine + amb;
+  $("ratioBar").innerHTML = tot ? `
+    <div style="width:${100*bounce/tot}%;background:#c9a227"></div>
+    <div style="width:${100*genuine/tot}%;background:#e05d5d"></div>
+    <div style="width:${100*amb/tot}%;background:#7f95ab"></div>` : "";
+  $("bounceRatio").textContent = s.bounce_ratio==null ? "–"
+      : (100*s.bounce_ratio).toFixed(1) + "%";
+  $("genuineRatio").textContent = s.genuine_move_ratio==null ? "–"
+      : (100*s.genuine_move_ratio).toFixed(1) + "%";
+
+  const tb = $("events").querySelector("tbody");
+  tb.innerHTML = (s.recent_events || []).slice(0, 14).map(e => `
+    <tr><td>${e.update_time || timeStr(e.ts)}</td>
+        <td style="color:${labelColor(e.label)}">${e.label||""}</td>
+        <td class="${e.direction>0?"pos":e.direction<0?"neg":""}">${e.direction>0?"↑":e.direction<0?"↓":"·"}</td>
+        <td class="num">${fmt(e.db,0)}</td>
+        <td class="num">${fmt(e.da,0)}</td>
+        <td class="num">${fmt(e.dl,0)}</td></tr>`).join("");
+
+  drawPrice(s.history || []);
+  drawObi(s.history || []);
+}
+
+function drawPrice(h) {
+  const cv = $("cPrice"), ctx = cv.getContext("2d");
+  const W = cv.width = cv.clientWidth * devicePixelRatio;
+  const H = cv.height = 180 * devicePixelRatio;
+  ctx.clearRect(0,0,W,H);
+  if (h.length < 2) return;
+  const last = h.map(p => p.last).filter(v => v!=null);
+  const mid = h.map(p => p.mid).filter(v => v!=null);
+  let lo = Math.min(...last, ...mid), hi = Math.max(...last, ...mid);
+  if (hi === lo) { hi += 1; lo -= 1; }
+  const pad = (hi-lo)*0.08; lo -= pad; hi += pad;
+  const X = i => i/(h.length-1)*(W-8)+4;
+  const Y = v => H-8 - (v-lo)/(hi-lo)*(H-16);
+  ctx.strokeStyle = "#3b556e"; ctx.lineWidth = 1*devicePixelRatio;
+  ctx.beginPath(); let started = false;
+  h.forEach((p,i) => { if (p.mid==null) return;
+    started ? ctx.lineTo(X(i),Y(p.mid)) : ctx.moveTo(X(i),Y(p.mid)); started=true; });
+  ctx.stroke();
+  ctx.strokeStyle = "#dce7f2"; ctx.lineWidth = 1.6*devicePixelRatio;
+  ctx.beginPath(); started = false;
+  h.forEach((p,i) => { if (p.last==null) return;
+    started ? ctx.lineTo(X(i),Y(p.last)) : ctx.moveTo(X(i),Y(p.last)); started=true; });
+  ctx.stroke();
+  (state.instruments[curInst].recent_events||[]).forEach(e => {
+    const i = h.findIndex(p => p && p.t === e.ts);
+    if (i >= 0 && h[i].last != null) {
+      ctx.fillStyle = labelColor(e.label);
+      ctx.beginPath();
+      ctx.arc(X(i), Y(h[i].last), 3*devicePixelRatio, 0, 7); ctx.fill();
+    }
+  });
+  ctx.fillStyle = "#7f95ab"; ctx.font = `${10*devicePixelRatio}px monospace`;
+  ctx.fillText(fmt(hi-pad,1), 6, 12*devicePixelRatio);
+  ctx.fillText(fmt(lo+pad,1), 6, H-4);
+}
+
+function drawObi(h) {
+  const cv = $("cObi"), ctx = cv.getContext("2d");
+  const W = cv.width = cv.clientWidth * devicePixelRatio;
+  const H = cv.height = 140 * devicePixelRatio;
+  ctx.clearRect(0,0,W,H);
+  if (h.length < 2) return;
+  const X = i => i/(h.length-1)*(W-8)+4;
+  ctx.strokeStyle = "#31465c";
+  ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
+  ctx.strokeStyle = "#4cc38a"; ctx.lineWidth = 1.4*devicePixelRatio;
+  ctx.beginPath(); let started = false;
+  h.forEach((p,i) => { if (p.obi==null) return;
+    const y = H/2 - p.obi*(H/2-6);
+    started ? ctx.lineTo(X(i),y) : ctx.moveTo(X(i),y); started=true; });
+  ctx.stroke();
+  const spreads = h.map(p => p.spread).filter(v => v!=null);
+  const mx = Math.max(1, ...spreads);
+  ctx.fillStyle = "#3b556e";
+  h.forEach((p,i) => { if (p.spread==null) return;
+    const bh = p.spread/mx*(H*0.22);
+    ctx.fillRect(X(i)-1, H-bh, 2, bh); });
+  ctx.fillStyle = "#7f95ab"; ctx.font = `${10*devicePixelRatio}px monospace`;
+  ctx.fillText("OBI1 (绿) · Spread ticks (灰)", 6, 12*devicePixelRatio);
+}
+
+window.addEventListener("resize", () => state && render());
+getToken();
+loadSettings();
+tick();
+</script>
+</body>
+</html>

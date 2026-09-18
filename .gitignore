@@ -1,0 +1,29 @@
+# environments / build
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.agents/
+.codex/
+
+# Original SDK archives (runtime headers and libraries live in third_party/)
+*.zip
+
+# CTP shim build artifacts are tracked intentionally (native/*.so needed at
+# runtime); md_shim.cpp is source. Keep both.
+
+# data (research artifacts, never commit)
+data/
+!data/.gitkeep
+
+# local secrets / notes
+.env
+.env.*
+!.env.example
+*.local.yaml
+settings.local.json
+nohup.out

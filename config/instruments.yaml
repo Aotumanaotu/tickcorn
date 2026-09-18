@@ -1,0 +1,23 @@
+# =====================================================================
+# instruments.yaml — 合约/品种静态配置（TickSize 等来自配置，禁止写死在代码中）
+# 说明:
+#   product: 品种代码（合约代码的字母前缀，例如 C2601 -> C）
+#   tick_size: 最小变动价位（元/吨）。玉米/玉米淀粉为 1.0。
+#   exchange: 交易所
+# 运行时可用 instruments.<合约ID> 覆盖 products 中的配置。
+# =====================================================================
+
+products:
+  C:   { exchange: DCE, tick_size: 1.0, name: "玉米" }
+  CS:  { exchange: DCE, tick_size: 1.0, name: "玉米淀粉" }
+  CF:  { exchange: CZCE, tick_size: 5.0, name: "棉花" }      # 示例: 非本课题品种
+  M:   { exchange: DCE, tick_size: 1.0, name: "豆粕" }       # 示例: 非本课题品种
+  RB:  { exchange: SHFE, tick_size: 1.0, name: "螺纹钢" }    # 示例: 非本课题品种
+
+# 单合约覆盖（优先级最高）。SimNow 上若某合约参数特殊，在此覆盖。
+instruments: {}
+  # C2701: { tick_size: 1.0 }
+
+# 未知品种的兜底行为: "error"（默认，安全）| "warn_and_use"（配合 default_tick_size）
+unknown_product_policy: error
+default_tick_size: null

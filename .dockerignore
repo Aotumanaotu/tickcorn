@@ -1,0 +1,10 @@
+.git/
+.venv/
+data/
+samples/
+__pycache__/
+*.pyc
+*.egg-info/
+*.zip
+.env
+nohup.out

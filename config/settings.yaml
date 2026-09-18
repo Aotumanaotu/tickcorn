@@ -1,0 +1,80 @@
+# =====================================================================
+# settings.yaml — 系统全局配置
+# 所有分析参数都会被记录进 SQLite 的 experiments/analysis_runs 表,
+# 保证分析可复现。环境变量可覆盖: SIMNOW_USER / SIMNOW_PASSWORD。
+# =====================================================================
+
+paths:
+  # 数据根目录（相对项目根或绝对路径）
+  data_dir: data
+  # raw/ processed/ features/ reports/ models/ live/ ctp_flow/ 自动创建于 data_dir 下
+
+ctp:
+  # SimNow 行情前置地址。若失效请到 simnow.com.cn 获取最新地址。
+  # 【7x24 环境】官方公告 2025-07-16 起开放（仅 CTP API 测试用）:
+  #   Market Front: 182.254.243.31:40011 (Trade: :40001)
+  #   服务时间: 交易日 16:00~次日09:00; 非交易日 16:00~次日12:00
+  #   注意: 新注册账号需等到第 3 个交易日才能使用该环境;
+  #         7x24 数据为模拟撮合, 论文统计应使用标准环境真实行情。
+  # 【标准/仿真环境】仅交易时段有行情(以下历史地址可能已轮换,
+  #   以 simnow.com.cn 登录后"产品与服务"页面公布的为准):
+  fronts:
+    - "tcp://182.254.243.31:40011"     # 7x24 环境 (API 联调/采集链路测试)
+    - "tcp://180.168.146.187:10131"    # 标准环境(历史地址,待核实)
+    - "tcp://180.168.146.187:10112"
+    - "tcp://218.202.237.33:10212"
+  broker_id: "9999"          # SimNow 模拟经纪商代码
+  user_env: "SIMNOW_USER"    # 存放用户名的环境变量名（凭据不要写进文件！）
+  password_env: "SIMNOW_PASSWORD"  # 存放密码的环境变量名
+  use_udp: false
+  use_multicast: false
+  production_mode: true
+
+collector:
+  flush_interval_s: 5        # 落盘间隔（秒）
+  flush_rows: 5000           # 缓冲达到该行数强制落盘
+  finalize_on_start: true    # 启动时自动 finalize 上次遗留的 staging 数据
+  live_feed_rows: 20000      # live jsonl 文件最大行数（超过则轮转）
+
+dashboard:
+  host: "127.0.0.1"
+  port: 8800
+  refresh_ms: 1000
+  history_points: 240        # 面板保留的最近快照点数
+
+# ---------------------------------------------------------------------
+# 跳点分类器参数（第一阶段核心参数，全部会被记录）
+# ---------------------------------------------------------------------
+classifier:
+  # 严格模式（默认）: Bid/Ask 必须同幅整体移动才判定 GENUINE_QUOTE_MOVE;
+  #                  宽松模式允许同向不同幅移动判为 GENUINE。
+  strict_symmetric_quote_move: true
+  # LIKELY_BOUNCE 判定时允许的 MidPrice 变化（tick 数，0 表示必须完全不变）
+  mid_tolerance_ticks: 0.0
+  # LIKELY_BOUNCE 是否要求 LastPrice 恰好 ±1 tick（spec 默认 true）
+  likely_bounce_requires_unit_move: true
+
+# ---------------------------------------------------------------------
+# 交易时段（玉米, DCE）。夜盘属于下一交易日（以 CTP TradingDay 为准）。
+# ---------------------------------------------------------------------
+sessions:
+  night: [{ start: "21:00", end: "23:00" }]
+  day:   [{ start: "09:00", end: "10:15" },
+          { start: "10:30", end: "11:30" },
+          { start: "13:30", end: "15:00" }]
+  # 开盘/收盘窗口（分钟），用于 intraday 分桶统计
+  open_close_window_min: 30
+
+# ---------------------------------------------------------------------
+# 统计分析参数
+# ---------------------------------------------------------------------
+analysis:
+  lookbacks: [1, 2, 3, 5, 10]        # 事件前观察窗口（snapshot 数）
+  horizons: [1, 2, 3, 5]             # 预测视野（snapshot 数）— 第二阶段使用，先统计
+  obi_bucket_edges: [-1.0, -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+  intraday_bin_minutes: 30           # intraday 分桶粒度
+  min_samples_test: 30               # 显著性检验最小样本量
+  significance_level: 0.05
+
+report:
+  title_prefix: "玉米期货 1-Tick 微观结构分析报告"

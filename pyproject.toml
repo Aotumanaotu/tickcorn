@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "corn-tick-microstructure"
+version = "0.1.0"
+description = "Corn futures 1-tick microstructure research system (Phase 1: CTP snapshot collection, replay, bid-ask bounce classification, statistics, reports)"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=1.5",
+    "numpy>=1.23",
+    "pyarrow>=10.0",
+    "scipy>=1.9",
+    "statsmodels>=0.13",
+    "matplotlib>=3.6",
+    "PyYAML>=6.0",
+    "tabulate>=0.9",
+]
+
+[project.optional-dependencies]
+accel = ["polars>=0.19"]
+model = ["scikit-learn>=1.1", "lightgbm>=3.3", "plotly>=5.10"]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+app = [
+    "dashboard/static/*.html",
+    "collector/native/*.cpp",
+    "collector/native/*.so",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
