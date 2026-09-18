@@ -1,2 +1,0 @@
-instrument_id,trading_day,group,total_snapshots,transitions,last_price_change_count,one_tick_last_change_count,quote_change_count,genuine_quote_move_up_count,genuine_quote_move_down_count,high_confidence_bounce_count,likely_bounce_count,ambiguous_count,no_move_count,bounce_ratio,genuine_move_ratio,ambiguous_ratio,high_bounce_share,mean_spread_ticks,mean_obi1,snapshot_rate_per_min
-C2701,2026-09-18,DAY,1240,1239,440,380,140,60,60,300,0,20,799,0.7894736842105263,0.3157894736842105,0.05263157894736842,1.0,1.032258064516129,-0.02246889178542416,240.38772213247174
