@@ -259,7 +259,8 @@ class CollectorService:
         state.sequence_id += 1
         state.msg_count += 1
         state.last_recv_ns = recv_ns
-        trading_day = fields.get("TradingDay", "")
+        from app.common.timeutils import normalize_ctp_day
+        trading_day = normalize_ctp_day(fields.get("TradingDay", ""))
         state.trading_days.add(trading_day)
 
         from app.collector.ctp_binding import depth_fields_to_row

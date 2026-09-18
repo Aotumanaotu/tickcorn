@@ -152,3 +152,43 @@ def test_sigterm_stops_web_collector(tmp_path):
         if proc.poll() is None:
             proc.kill()
             proc.communicate()
+
+
+def test_native_callback_to_parquet_and_clean_dates(tmp_path):
+    """Exercise the actual evt=9 dispatcher, including real CTP date formats."""
+    import ctypes
+    from app.collector.ctp_binding import CTPDepthMarketData, CtpMdClient
+    from app.storage.repo import StorageRepository
+    cfg = load_config(ROOT / "config", tmp_path)
+    svc = CollectorService(cfg, ["C2611"], "test-user", "test-password", raw_source="synthetic")
+    client = CtpMdClient.__new__(CtpMdClient)
+    client.handler = svc
+    depth = CTPDepthMarketData()
+    depth.InstrumentID = b"c2611"
+    depth.TradingDay = depth.ActionDay = b"20260918"
+    depth.UpdateTime = b"09:30:00"
+    depth.LastPrice = depth.BidPrice1 = 2300
+    depth.AskPrice1 = 2301
+    depth.BidVolume1 = depth.AskVolume1 = 10
+    writer = threading.Thread(target=svc._writer_loop)
+    writer.start()
+    try:
+        client._on_event(9, ctypes.byref(depth), None, 0, 0)
+        depth.UpdateMillisec = 500
+        depth.LastPrice = 2301
+        client._on_event(9, ctypes.byref(depth), None, 0, 0)
+    finally:
+        svc._writer_done.set()
+        writer.join(5)
+        svc._close_live_feed()
+    assert not writer.is_alive() and svc._writer_error is None
+    assert svc.live.instrument("C2611").snapshot()["msg_count"] == 2
+    svc._finalize_all()
+    keys = svc.store.list_partitions()
+    assert len(keys) == 1 and keys[0].trading_day == "2026-09-18"
+    raw = svc.store.read_partition(keys[0]).to_pandas()
+    assert raw["action_day"].tolist() == ["20260918", "20260918"]
+    clean = StorageRepository(cfg).load_clean("C2611", "2026-09-18").df
+    assert len(clean) == 2
+    assert clean["action_day"].tolist() == ["2026-09-18", "2026-09-18"]
+    assert clean["minute_of_day"].tolist() == [570, 570]

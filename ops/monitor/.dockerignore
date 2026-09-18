@@ -1,4 +1,10 @@
-node_modules
-npm-debug.log*
-.env
-*.log
+# Only source and dependency manifests enter the build context.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!src/
+!src/**
+**/.env*
+**/*.local.*
+**/*.log

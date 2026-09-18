@@ -28,6 +28,7 @@ from app.common.config import AppConfig
 from app.common.exceptions import StorageError
 from app.common.logging import get_logger
 from app.common.schema import CTP_COLUMNS, RAW_SCHEMA, PartitionKey
+from app.common.timeutils import normalize_ctp_day
 from app.features.derived import (PRICE_COLUMNS, add_basic_quote_features,
                                   add_deltas, add_ts_and_minute, clean_prices)
 from app.storage.metadata_db import MetadataDB
@@ -90,7 +91,7 @@ class StorageRepository:
         raw_sig = hashlib.sha256("".join(self.input_hashes([key])).encode()).hexdigest()[:16]
         if any(self.store.staging_dir(key).glob("part-*.parquet")):
             use_cache = False
-        param_sig = f"v2-tick{tick}"
+        param_sig = f"v3-tick{tick}"
         cache_path = cache_dir / f"clean-{raw_sig}-{param_sig}.parquet"
         stats_path = cache_dir / f"clean-{raw_sig}-{param_sig}.json"
 
@@ -150,6 +151,10 @@ def build_clean_dataframe(df: pd.DataFrame, tick_size: float) -> CleanResult:
     # 2) sentinel -> NaN
     df = clean_prices(df, PRICE_COLUMNS)
 
+    # Normalize CTP calendar strings only in the processed layer.
+    for col in ("action_day", "trading_day"):
+        if col in df:
+            df[col] = df[col].map(normalize_ctp_day)
     # 3) deterministic exchange timestamp
     df = add_ts_and_minute(df)
 

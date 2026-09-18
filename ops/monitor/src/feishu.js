@@ -16,6 +16,36 @@ export function validateFeishuConfig(cfg) {
   return missing;
 }
 
+function feishuErrorDetail(err) {
+  const candidates = [];
+  const respData = err?.response?.data;
+  if (Array.isArray(respData)) candidates.push(...respData);
+  else if (respData) candidates.push(respData);
+  if (respData && typeof respData === "object" && respData.data) {
+    candidates.push(respData.data);
+  }
+  if (err?.data) candidates.push(err.data);
+  for (const c of candidates) {
+    if (c && typeof c === "object" && (c.code != null || c.msg)) return c;
+  }
+  return null;
+}
+
+function formatFeishuError(detail) {
+  const code = detail.code ?? "?";
+  const msg = detail.msg || detail.message || "";
+  const violations = Array.isArray(detail.permission_violations)
+    ? detail.permission_violations
+        .map((v) => v?.scope_name || v?.scope || v)
+        .filter(Boolean)
+    : [];
+  const scopes = [...new Set(violations)];
+  const scopeHint = scopes.length
+    ? `；请在飞书开放平台添加权限: ${scopes.join(", ")}`
+    : "";
+  return `飞书发送失败 code=${code} msg=${msg}${scopeHint}`;
+}
+
 export async function sendFeishu(cfg, text, log = console) {
   const missing = validateFeishuConfig(cfg);
   if (missing.length) {
@@ -34,18 +64,25 @@ export async function sendFeishu(cfg, text, log = console) {
     domain: cfg.feishuDomain === "lark" ? lark.Domain?.Lark : lark.Domain?.Feishu,
   });
 
-  const res = await client.im.v1.message.create({
-    params: { receive_id_type: cfg.feishuReceiveIdType },
-    data: {
-      receive_id: cfg.feishuReceiveId,
-      msg_type: "text",
-      content: JSON.stringify({ text }),
-    },
-  });
+  let res;
+  try {
+    res = await client.im.v1.message.create({
+      params: { receive_id_type: cfg.feishuReceiveIdType },
+      data: {
+        receive_id: cfg.feishuReceiveId,
+        msg_type: "text",
+        content: JSON.stringify({ text }),
+      },
+    });
+  } catch (err) {
+    const detail = feishuErrorDetail(err);
+    if (detail) throw new Error(formatFeishuError(detail));
+    throw new Error(`飞书发送失败: ${err?.message || err}`);
+  }
 
   const code = res?.code ?? res?.data?.code;
   if (code !== undefined && code !== 0) {
-    throw new Error(`飞书发送失败 code=${code} msg=${res?.msg || res?.data?.msg || ""}`);
+    throw new Error(formatFeishuError(res?.data ? { ...res.data, code } : res));
   }
   return res;
 }

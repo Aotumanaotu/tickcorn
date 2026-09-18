@@ -86,3 +86,27 @@ Docker 的停止宽限期为 120 秒；见 [Compose 服务配置](https://docs.d
 ## 监控与每日简报
 
 `ops/monitor/` 提供一个独立的 Node 服务，定时检查面板可用性、采集运行状态、行情连接、当日数据量与磁盘，并通过飞书官方机器人 SDK 每天推送简报。它挂在 Compose 的 `monitor` profile 下，普通 `docker compose up` 不会启动。飞书凭证、发送时间等直接在网页控制台的“每日简报”里填写（存放在数据卷本地受限文件，monitor 自动重读，无需重启或改 `.env`）。配置与启动步骤见 [ops/monitor/README.md](../ops/monitor/README.md)。该服务只读，不会自动重启采集。
+
+
+## 拉取新代码后重建镜像
+
+先在网页停止采集，再在服务器的原部署目录执行（不要另换目录或项目名）：
+
+```bash
+git pull --ff-only
+sudo docker compose build corn-tick
+sudo docker compose up -d --no-deps --wait corn-tick
+sudo docker compose ps
+sudo docker compose logs --tail=100 corn-tick
+```
+
+`restart` 不会把新代码构建进旧镜像；`build` 后的 `up -d` 才会按新镜像重建容器。命名数据卷不会被删除。更新后保持原 SSH 隧道，在网页重新登录并开始采集。
+
+如启用了监控且本次更新也修改了监控代码，接着执行：
+
+```bash
+sudo docker compose --profile monitor build monitor
+sudo docker compose --profile monitor up -d --no-deps monitor
+```
+
+账号、密码、飞书凭据仍在网页填写。重建后确认日志无 `evt=9` 转换异常，网页消息计数增长，再检查 `sudo docker compose exec -T corn-tick python -m app info` 是否出现原始分片；停止采集后运行 `verify` 和 `analyze`。只看容器 healthy 或测试通过不能替代这一步真实行情验收。

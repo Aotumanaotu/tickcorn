@@ -156,7 +156,7 @@ def depth_struct_to_fields(p: ctypes.POINTER(CTPDepthMarketData)) -> dict:
     """CTP struct pointer -> {CTPFieldName: python value}."""
     s = p.contents
     out: dict = {}
-    for field, _t, _ in CTPDepthMarketData._fields_:
+    for field, _t in CTPDepthMarketData._fields_:
         if field.startswith("reserve"):
             continue
         v = getattr(s, field)

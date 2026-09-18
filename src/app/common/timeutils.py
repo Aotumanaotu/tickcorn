@@ -16,6 +16,12 @@ from app.common.config import AppConfig, TimeRange
 BEIJING_TZ = timezone(timedelta(hours=8))
 
 
+def normalize_ctp_day(day: str) -> str:
+    """Normalize partition keys while retaining original CTP fields in raw rows."""
+    fmt = "%Y%m%d" if len(day) == 8 and day.isdigit() else "%Y-%m-%d"
+    return datetime.strptime(day, fmt).strftime("%Y-%m-%d")
+
+
 def exchange_ts_ns(action_day: str, update_time: str, update_millisec: int) -> int:
     """Nanoseconds since epoch for an exchange snapshot timestamp.
 
@@ -24,6 +30,7 @@ def exchange_ts_ns(action_day: str, update_time: str, update_millisec: int) -> i
     """
     if not action_day or not update_time:
         raise ValueError(f"invalid timestamp parts: {action_day!r} {update_time!r}")
+    action_day = normalize_ctp_day(action_day)
     dt = datetime.strptime(f"{action_day} {update_time}", "%Y-%m-%d %H:%M:%S")
     dt = dt.replace(tzinfo=BEIJING_TZ)
     return int(dt.timestamp() * 1_000_000_000) + int(update_millisec) * 1_000_000

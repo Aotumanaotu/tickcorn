@@ -122,6 +122,11 @@ export function buildReport(data, cfg, now = new Date()) {
       );
       lines.push(`     反弹比 ${bounce} / 真实移动比 ${genuine}`);
     }
+  } else {
+    lines.push("");
+    lines.push(
+      "行情: ⚪ 尚未收到快照，请结合前置服务时间、订阅状态和采集错误日志判断",
+    );
   }
 
   lines.push("");

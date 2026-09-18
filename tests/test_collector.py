@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app.collector.ctp_binding import depth_fields_to_row
+from app.collector.ctp_binding import depth_fields_to_row, depth_struct_to_fields
 from app.collector.live import (JsonlTailSource, LiveClassifier, LiveState,
                                 live_feed_path)
 from conftest import make_row
@@ -56,6 +56,43 @@ def test_depth_fields_to_row_schema():
     from app.common.schema import RAW_COLUMN_NAMES
     missing = [c for c in RAW_COLUMN_NAMES if c not in row]
     assert not missing, missing
+
+
+def test_depth_struct_to_fields_reads_ctypes_struct():
+    """Regression: _fields_ entries are 2-tuples, not 3.
+
+    The market-data callback converts the native struct pointer through this
+    function; a wrong unpack raised on every tick and silently dropped all data.
+    """
+    import ctypes
+    from app.collector.ctp_binding import CTPDepthMarketData
+
+    s = CTPDepthMarketData()
+    s.TradingDay = b"20260918"
+    s.ExchangeID = b"DCE"
+    s.InstrumentID = b"C2611"
+    s.LastPrice = 2345.0
+    s.BidPrice1 = 2344.0
+    s.AskPrice1 = 2345.0
+    s.BidVolume1 = 30
+    s.AskVolume1 = 10
+    s.UpdateTime = b"21:00:00"
+    s.UpdateMillisec = 500
+    s.Volume = 12345
+
+    out = depth_struct_to_fields(ctypes.pointer(s))
+    assert out["TradingDay"] == "20260918"
+    assert out["ExchangeID"] == "DCE"
+    assert out["InstrumentID"] == "C2611"
+    assert out["LastPrice"] == 2345.0
+    assert out["BidPrice1"] == 2344.0
+    assert out["AskPrice1"] == 2345.0
+    assert out["BidVolume1"] == 30
+    assert out["AskVolume1"] == 10
+    assert out["UpdateTime"] == "21:00:00"
+    assert out["UpdateMillisec"] == 500
+    assert out["Volume"] == 12345
+    assert "reserve1" not in out and "reserve2" not in out
 
 
 def test_live_classifier_toggle():
