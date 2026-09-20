@@ -6,7 +6,10 @@
  *   and hands control back to the auth store (logout + redirect).
  */
 
+import { apiErrorMessage } from '@/labels'
+
 import type {
+  ArchivePartition, ReportJob, MonitorSettings, MonitorWorker,
   Envelope,
   GatewayConnectPayload,
   Instrument,
@@ -27,7 +30,7 @@ export class ApiError extends Error {
   detail: string
 
   constructor(status: number, detail: string) {
-    super(detail || `HTTP ${status}`)
+    super(apiErrorMessage(status, detail))
     this.name = 'ApiError'
     this.status = status
     this.detail = detail
@@ -57,6 +60,7 @@ interface RequestOptions {
   credentials?: RequestCredentials
   auth?: boolean
   signal?: AbortSignal
+  download?: boolean
 }
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
@@ -81,9 +85,9 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
       onSessionExpired()
       throw new ApiError(401, 'Session expired')
     }
-    return unwrap<T>(replay)
+    return unwrap<T>(replay, opts.download)
   }
-  return unwrap<T>(res)
+  return unwrap<T>(res, opts.download)
 }
 
 async function doFetch(path: string, opts: RequestOptions): Promise<Response> {
@@ -95,16 +99,21 @@ async function doFetch(path: string, opts: RequestOptions): Promise<Response> {
   }
   const token = opts.auth === false ? null : getAccessToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
-  return fetch(`${BASE}${path}`, {
-    method: opts.method ?? 'GET',
-    headers,
-    body,
-    credentials: opts.credentials ?? 'same-origin',
-    signal: opts.signal,
-  })
+  try {
+    return await fetch(`${BASE}${path}`, {
+      method: opts.method ?? 'GET',
+      headers,
+      body,
+      credentials: opts.credentials ?? 'same-origin',
+      signal: opts.signal,
+    })
+  } catch (err) {
+    if (err instanceof TypeError) throw new Error('网络连接失败，请检查网络后重试。')
+    throw err
+  }
 }
 
-async function unwrap<T>(res: Response): Promise<T> {
+async function unwrap<T>(res: Response, download = false): Promise<T> {
   if (!res.ok) {
     let detail = ''
     try {
@@ -115,6 +124,7 @@ async function unwrap<T>(res: Response): Promise<T> {
     }
     throw new ApiError(res.status, detail || res.statusText)
   }
+  if (download) return (await res.blob()) as T
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
@@ -237,3 +247,15 @@ export const systemApi = {
 
 // Re-export so ws/client.ts can share the envelope type.
 export type { Envelope }
+
+export const researchApi = {
+  archives: () => request<{ partitions: ArchivePartition[]; sources: Record<string, string> }>('/research/archives'),
+  reports: () => request<{ jobs: ReportJob[]; busy: boolean }>('/research/reports'),
+  generate: (payload: { instrument: string; day: string; source: string }) => request<ReportJob>('/research/reports', { method: 'POST', body: payload }),
+  download: (id: string, kind: string) => request<Blob>(`/research/reports/${encodeURIComponent(id)}/${kind}`, { download: true }),
+}
+export const monitorApi = {
+  settings: () => request<{ settings: MonitorSettings; worker: MonitorWorker }>('/monitor/settings'),
+  save: (settings: MonitorSettings) => request<{ settings: MonitorSettings; worker: MonitorWorker }>('/monitor/settings', { method: 'PUT', body: settings }),
+  test: () => request<{ test_request: number }>('/monitor/test', { method: 'POST' }),
+}

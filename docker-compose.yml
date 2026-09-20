@@ -62,8 +62,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Public HTTPS entry: automatic Let's Encrypt for DOMAIN, proxies to api.
-  # Security group must allow inbound 80 + 443; DNS A record -> server IP.
+  # Public HTTPS entry: www.DOMAIN proxies to api; DOMAIN redirects to www.
+  # Set DOMAIN to the bare domain; both @ and www DNS records -> server IP.
+  # Security group must allow inbound 80 + 443.
   caddy:
     image: caddy:2-alpine
     platform: linux/amd64
@@ -130,6 +131,37 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Scheduled Feishu briefings; disabled until configured in the Chinese UI.
+  monitor:
+    build: ./ops/monitor
+    environment:
+      API_MODE: microterm
+      DASHBOARD_URL: http://api:8000
+      DASHBOARD_TOKEN_FILE: /data/monitor-token.local.json
+      DATA_DIR: /data
+      MONITOR_ENABLED: "false"
+      SERVICE_NAME: tickcorn
+      TZ: Asia/Shanghai
+    volumes:
+      - microterm-data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
     logging:
       driver: json-file
       options:

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { categoryLabel, exchangeLabel } from '@/labels'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -106,7 +107,7 @@ async function toggleWatch(row: Row, event: Event): Promise<void> {
     await store.toggleWatch(row.instrument_id)
   } catch (err) {
     appToast.error(
-      err instanceof Error ? err.message : 'Failed to update watchlist',
+      err instanceof Error ? err.message : '更新自选合约失败',
     )
   }
 }
@@ -114,12 +115,12 @@ async function toggleWatch(row: Row, event: Event): Promise<void> {
 
 <template>
   <PageContainer
-    title="Markets"
-    subtitle="Contract catalog across supported exchanges"
+    title="行情市场"
+    subtitle="浏览各交易所的品种与合约"
   >
     <div class="layout">
       <aside class="rail card">
-        <div class="card-title"><span>Products</span></div>
+        <div class="card-title"><span>品种</span></div>
         <div class="rail-body">
           <button
             class="product-all"
@@ -127,17 +128,17 @@ async function toggleWatch(row: Row, event: Event): Promise<void> {
             type="button"
             @click="productFilter = ''"
           >
-            All products
+            全部品种
           </button>
           <div v-for="group in productGroups" :key="group.category" class="group">
-            <div class="group-label">{{ group.category }}</div>
+            <div class="group-label">{{ categoryLabel(group.category) }}</div>
             <button
               v-for="p in group.products"
               :key="p.code"
               class="product"
               :class="{ active: productFilter === p.code }"
               type="button"
-              :title="`${p.name} · ${p.exchange}`"
+              :title="`${p.name} · ${exchangeLabel(p.exchange)}`"
               @click="selectProduct(p.code)"
             >
               <span class="product-name">{{ p.name }}</span>
@@ -146,8 +147,8 @@ async function toggleWatch(row: Row, event: Event): Promise<void> {
           </div>
           <EmptyState
             v-if="!productGroups.length"
-            title="No products"
-            hint="Product reference data loads once the backend is reachable."
+            title="暂无品种"
+            hint="连接服务后将自动加载品种资料。"
           />
         </div>
       </aside>
@@ -158,26 +159,26 @@ async function toggleWatch(row: Row, event: Event): Promise<void> {
             v-model="search"
             class="input search"
             type="search"
-            placeholder="Search instrument or product…"
+            placeholder="搜索合约或品种…"
           />
           <select v-model="exchangeFilter" class="select exchange">
-            <option value="">All exchanges</option>
+            <option value="">全部交易所</option>
             <option v-for="ex in exchangeOptions()" :key="ex" :value="ex">
-              {{ ex }}
+              {{ exchangeLabel(ex) }}
             </option>
           </select>
-          <span class="count num">{{ rows.length }} contracts</span>
+          <span class="count num">{{ rows.length }} 个合约</span>
         </div>
 
         <div class="table-wrap">
           <table class="table">
             <thead>
               <tr>
-                <th>Instrument</th>
-                <th>Name</th>
-                <th>Exchange</th>
-                <th class="num-col">Tick</th>
-                <th class="num-col">Main</th>
+                <th>合约</th>
+                <th>名称</th>
+                <th>交易所</th>
+                <th class="num-col">最小变动价位</th>
+                <th class="num-col">主力</th>
                 <th class="actions-col"></th>
               </tr>
             </thead>
@@ -196,10 +197,10 @@ async function toggleWatch(row: Row, event: Event): Promise<void> {
                       : '—'
                   }}
                 </td>
-                <td class="mono dim">{{ row.exchange }}</td>
+                <td class="mono dim">{{ exchangeLabel(row.exchange) }}</td>
                 <td class="num-col mono dim">{{ tickLabel(row.tick_size) }}</td>
                 <td class="num-col">
-                  <span v-if="row.is_main" class="main-star" title="Main contract">★</span>
+                  <span v-if="row.is_main" class="main-star" title="主力合约">★</span>
                   <span v-else class="dim">—</span>
                 </td>
                 <td class="actions-col">
@@ -209,7 +210,7 @@ async function toggleWatch(row: Row, event: Event): Promise<void> {
                     type="button"
                     @click="toggleWatch(row, $event)"
                   >
-                    {{ row.watched ? '★ Watched' : '☆ Add' }}
+                    {{ row.watched ? '★ 已自选' : '☆ 加入自选' }}
                   </button>
                 </td>
               </tr>
@@ -217,8 +218,8 @@ async function toggleWatch(row: Row, event: Event): Promise<void> {
           </table>
           <EmptyState
             v-if="!rows.length && !store.loading"
-            title="No instruments match"
-            hint="Adjust the search term, exchange or product filter."
+            title="没有匹配的合约"
+            hint="请调整搜索内容、交易所或品种筛选条件。"
           />
         </div>
       </div>

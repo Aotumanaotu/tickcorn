@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { stateLabel } from '@/labels'
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -38,30 +39,30 @@ const gatewayStateDot = computed<'ok' | 'warn' | 'error' | 'idle'>(() => {
 })
 
 const gatewaySub = computed(() => {
-  const count = system.gateway?.instruments?.length ?? 0
+  const count = Object.keys(system.gateway?.instruments ?? {}).length ?? 0
   const events = system.gateway?.events_published
   const parts: string[] = []
-  if (count) parts.push(`${count} subscribed`)
-  if (events !== undefined) parts.push(`${events.toLocaleString()} events`)
-  return parts.join(' · ') || 'No subscriptions'
+  if (count) parts.push(`已订阅 ${count} 个合约`)
+  if (events !== undefined) parts.push(`${events.toLocaleString('zh-CN')} 条事件`)
+  return parts.join(' · ') || '暂无订阅'
 })
 
 const ingestSub = computed(() => {
   const events = system.status?.ingest.events_received
   if (events === undefined) return '—'
-  return `${events.toLocaleString()} events received`
+  return `已接收 ${events.toLocaleString('zh-CN')} 条事件`
 })
 
 const lastEventAgo = computed(() => {
   const iso = system.status?.ingest.last_event_at
-  if (!iso) return 'no events yet'
-  const ms = Date.now() - new Date(iso).getTime()
-  if (Number.isNaN(ms) || ms < 0) return 'just now'
+  if (!iso) return '暂无事件'
+  const ms = Date.now() - iso * 1000
+  if (Number.isNaN(ms) || ms < 0) return '刚刚'
   const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s ago`
+  if (s < 60) return `${s} 秒前`
   const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  return `${Math.floor(m / 60)}h ago`
+  if (m < 60) return `${m} 分钟前`
+  return `${Math.floor(m / 60)} 小时前`
 })
 
 const wsDot = computed<'ok' | 'warn' | 'idle'>(() =>
@@ -70,7 +71,7 @@ const wsDot = computed<'ok' | 'warn' | 'idle'>(() =>
 
 const wsSub = computed(
   () =>
-    `market: ${realtime.marketState} · analysis: ${realtime.analysisState} · ${realtime.quotes.size} quotes`,
+    `行情：${stateLabel(realtime.marketState)} · 分析：${stateLabel(realtime.analysisState)} · ${realtime.quotes.size} 条报价`,
 )
 
 // --- watchlist -----------------------------------------------------------------
@@ -88,31 +89,37 @@ function openInstrument(id: string): void {
 
 <template>
   <PageContainer
-    title="Overview"
-    :subtitle="`System health, watchlist and research activity · backend v${system.version || '—'}`"
+    title="总览"
+    :subtitle="`系统状态、自选合约与研究动态 · 服务版本 v${system.version || '—'}`"
   >
+    <div class="workflow">
+      <router-link class="btn btn-primary" to="/system">CTP 采集控制</router-link>
+      <router-link class="btn" to="/microstructure">查看 tick 跳变</router-link>
+      <router-link class="btn" to="/research">历史数据与报告导出</router-link>
+      <router-link class="btn" to="/monitor">飞书运行简报</router-link>
+    </div>
     <div class="metrics">
       <MetricCard
-        label="Gateway"
-        :value="gatewayState"
+        label="行情网关"
+        :value="stateLabel(gatewayState)"
         :sub="gatewaySub"
         :state="gatewayStateDot"
       />
       <MetricCard
-        label="Database"
-        :value="system.dbOk ? 'OK' : 'Error'"
+        label="数据库"
+        :value="system.dbOk ? '正常' : '异常'"
         :state="system.dbOk ? 'ok' : 'error'"
-        sub="PostgreSQL · ticks & events"
+        sub="PostgreSQL · 行情与事件"
       />
       <MetricCard
-        label="WebSocket"
-        :value="realtime.marketState === 'open' ? 'Connected' : 'Disconnected'"
+        label="实时连接"
+        :value="realtime.marketState === 'open' ? '已连接' : '未连接'"
         :sub="wsSub"
         :state="wsDot"
       />
       <MetricCard
-        label="Ingest"
-        :value="(system.status?.ingest.events_received ?? 0).toLocaleString()"
+        label="数据接收"
+        :value="(system.status?.ingest.events_received ?? 0).toLocaleString('zh-CN')"
         :sub="`${ingestSub} · ${lastEventAgo}`"
         :state="system.status?.ingest.last_event_at ? 'ok' : 'idle'"
       />
@@ -121,8 +128,8 @@ function openInstrument(id: string): void {
     <div class="grid">
       <div class="card">
         <div class="card-title">
-          <span>Watchlist</span>
-          <router-link class="manage" :to="{ name: 'markets' }">Manage →</router-link>
+          <span>自选合约</span>
+          <router-link class="manage" :to="{ name: 'markets' }">管理 →</router-link>
         </div>
         <div v-if="watchItems.length" class="watch-list">
           <button
@@ -145,38 +152,32 @@ function openInstrument(id: string): void {
         </div>
         <EmptyState
           v-else
-          title="No instruments watched yet"
-          hint="Browse the markets catalog and add contracts to your watchlist."
+          title="尚未添加自选合约"
+          hint="前往行情市场，将关注的合约加入自选。"
         >
           <router-link class="btn btn-primary" :to="{ name: 'markets' }">
-            Browse Markets
+            浏览行情市场
           </router-link>
         </EmptyState>
       </div>
 
       <div class="grid-col">
-        <div class="card">
-          <div class="card-title"><span>Recent Sessions</span></div>
-          <EmptyState
-            icon="clock"
-            title="Available in F4"
-            hint="Recorded microstructure sessions will be listed here."
-          />
-        </div>
-        <div class="card">
-          <div class="card-title"><span>Latest Reports</span></div>
-          <EmptyState
-            icon="flask"
-            title="Available in F4"
-            hint="Session reports and bounce-ratio analyses will appear here."
-          />
-        </div>
+        <div class="card"><div class="card-title">研究流程</div><div class="card-body">
+          <p>① 连接 CTP 并记录原始 tick 快照</p><p>② 观察价格阶梯跳变、反弹比例与真实报价移动</p>
+          <p>③ 停止采集并归档，按合约、交易日和来源生成报告</p><p>④ 导出统计、特征与图表，积累后续量化模型研究数据</p>
+        </div></div>
+        <div class="card"><div class="card-title">统计口径</div><div class="card-body">
+          <p>实时比例使用最近 200 次转换中，最新价变化恰好为 1 tick 的子集。完整历史统计以归档报告为准。</p>
+          <p>本地模拟和 SimNow 测试数据用于联调；各来源分别分析。</p>
+        </div></div>
       </div>
     </div>
   </PageContainer>
 </template>
 
 <style scoped>
+.workflow { display: flex; gap: 10px; flex-wrap: wrap; }
+.card-body p { margin-bottom: 12px; line-height: 1.7; }
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

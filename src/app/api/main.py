@@ -9,6 +9,9 @@ handlers and WS endpoints share single instances.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -21,6 +24,11 @@ from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.analysis.realtime import RealtimeMetrics
+from app.api.routers import research as research_router
+from app.api.routers import monitor as monitor_router
+from app.common.private_files import write_private_json
+from app.legacy.dashboard.reports import ReportStore
+from app.legacy.dashboard.monitor_settings import MonitorSettingsStore
 from app.api.routers import auth as auth_router
 from app.api.routers import instruments as instruments_router
 from app.api.routers import market as market_router
@@ -87,6 +95,16 @@ def create_app(config: Optional[AppConfig] = None,
                                 event_types={EVENT_CONNECTION, EVENT_SYSTEM}),
         ]
 
+        app.state.reports = ReportStore(config)
+        app.state.research_lock = asyncio.Lock()
+        app.state.monitor_lock = asyncio.Lock()
+        app.state.monitor_settings = MonitorSettingsStore(config.paths.data_dir)
+        token_path = config.paths.data_dir / "monitor-token.local.json"
+        if token_path.exists():
+            app.state.monitor_token = json.loads(token_path.read_text())["token"]
+        else:
+            app.state.monitor_token = secrets.token_urlsafe(48)
+            write_private_json(token_path, {"token": app.state.monitor_token})
         app.state.config = config
         app.state.settings = settings
         app.state.engine = engine
@@ -153,6 +171,8 @@ def create_app(config: Optional[AppConfig] = None,
     app.include_router(instruments_router.router, prefix="/api/v1")
     app.include_router(market_router.router, prefix="/api/v1")
     app.include_router(system_router.router, prefix="/api/v1")
+    app.include_router(research_router.router, prefix="/api/v1")
+    app.include_router(monitor_router.router, prefix="/api/v1")
     app.include_router(ws_routes.router)
 
     if _FRONTEND_DIST.is_dir():

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { roleLabel } from '@/labels'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -32,22 +33,22 @@ async function handleLogout(): Promise<void> {
     <h1 class="page-title">{{ pageTitle }}</h1>
 
     <div class="topbar-right">
-      <ConnectionBadge v-if="isDev" label="DEV" tone="warn" />
-      <ConnectionBadge v-if="system.simulate" label="SIM" tone="warn" />
+      <ConnectionBadge v-if="isDev" label="开发环境" tone="warn" />
+      <ConnectionBadge v-if="system.simulate" label="模拟行情" tone="warn" />
 
-      <div v-if="system.isLive" class="live" title="Live market data">
+      <div v-if="system.isLive" class="live" title="实时行情">
         <span class="live-dot" />
-        <span class="live-label">LIVE</span>
+        <span class="live-label">实时行情</span>
       </div>
-      <div v-else class="live live-off" title="Gateway not streaming">
+      <div v-else class="live live-off" title="网关尚未推送行情">
         <span class="live-dot off" />
-        <span class="live-label">OFFLINE</span>
+        <span class="live-label">离线</span>
       </div>
 
       <button
         class="icon-btn"
         type="button"
-        :aria-label="theme.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
+        :aria-label="theme.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
         @click="theme.toggle()"
       >
         <svg
@@ -76,7 +77,7 @@ async function handleLogout(): Promise<void> {
           <div v-if="menuOpen" class="menu card" @click.stop>
             <div class="menu-head">
               <div class="menu-user">{{ auth.user?.username }}</div>
-              <span class="badge badge-accent">{{ auth.role }}</span>
+              <span class="badge badge-accent">{{ roleLabel(auth.role) }}</span>
             </div>
             <hr class="divider" />
             <button class="menu-item" type="button" @click="handleLogout">
@@ -84,7 +85,7 @@ async function handleLogout(): Promise<void> {
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                 <path d="M16 17l5-5-5-5M21 12H9" />
               </svg>
-              Logout
+              退出登录
             </button>
           </div>
         </Transition>

@@ -65,12 +65,15 @@ async def system_status(
 async def _send_control(request: Request, cmd: str, payload: dict) -> dict:
     ingest = request.app.state.ingest
     try:
-        return await ingest.send_control(cmd, payload)
+        return await ingest.send_control(cmd, payload, timeout=120.0 if cmd == CMD_DISCONNECT else 15.0)
     except GatewayUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="网关未连接",
+            detail=str(exc) if ingest.connected else "网关未连接",
         ) from exc
+
+    except TimeoutError as exc:
+        raise HTTPException(504, "网关处理超时，请刷新状态确认结果，勿重复操作") from exc
 
 
 @router.post("/gateway/connect")
@@ -80,7 +83,10 @@ async def gateway_connect(
     _user: User = Depends(require_perm(Permission.MANAGE_USER)),
 ) -> dict:
     """Log the CTP gateway in and start the requested subscriptions."""
-    return await _send_control(request, CMD_CONNECT, body.model_dump())
+    async with request.app.state.research_lock:
+        if request.app.state.reports.busy:
+            raise HTTPException(409, "报告正在生成，请完成后再开始采集")
+        return await _send_control(request, CMD_CONNECT, body.model_dump())
 
 
 @router.post("/gateway/disconnect")

@@ -21,6 +21,7 @@ export interface RealtimeQuote {
  */
 export const useRealtimeStore = defineStore('realtime', () => {
   const quotes = ref<Map<string, RealtimeQuote>>(new Map())
+  const quoteHistory = ref<Map<string, RealtimeQuote[]>>(new Map())
   const microRing = ref<Envelope[]>([])
   const analysis = ref<Map<string, Envelope>>(new Map())
   const marketState = ref<string>('idle')
@@ -38,6 +39,10 @@ export const useRealtimeStore = defineStore('realtime', () => {
         exchangeTsNs: env.exchange_ts_ns,
         dataMode: env.data_mode,
       })
+      const history = quoteHistory.value.get(env.instrument_id) ?? []
+      history.push(quotes.value.get(env.instrument_id)!)
+      if (history.length > 300) history.splice(0, history.length - 300)
+      quoteHistory.value.set(env.instrument_id, history)
     } else if (env.type === 'micro') {
       microRing.value.push(env)
       if (microRing.value.length > MICRO_RING_MAX) {
@@ -76,12 +81,17 @@ export const useRealtimeStore = defineStore('realtime', () => {
     detach = []
     wsMarket.close()
     wsAnalysis.close()
+    quotes.value.clear()
+    quoteHistory.value.clear()
+    microRing.value = []
+    analysis.value.clear()
   }
 
   let detach: (() => void)[] = []
 
   return {
     quotes,
+    quoteHistory,
     microRing,
     analysis,
     marketState,

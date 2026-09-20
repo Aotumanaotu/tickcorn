@@ -85,7 +85,18 @@ def validate_connect_payload(payload: Any) -> dict:
     remember = payload.get("remember", False)
     if not isinstance(remember, bool):
         raise ValueError("记住密码应为布尔值")
+    source_kind = payload.get("source_kind", "unspecified")
+    if source_kind not in {"unspecified", "simnow_test", "simnow_standard"}:
+        raise ValueError("数据来源无效")
+    if source_kind != "unspecified":
+        from app.legacy.dashboard.environments import validate_source
+        from app.common.exceptions import AppError
+        try:
+            validate_source(clean_fronts, source_kind)
+        except AppError as exc:
+            raise ValueError(str(exc)) from exc
     return {
+        "source_kind": source_kind,
         "fronts": clean_fronts,
         "broker_id": broker_id,
         "user": user,

@@ -73,8 +73,8 @@ env -u PYTHONPATH .venv/bin/python -m app api --port 8000
 cd frontend && npm install && npm run dev    # http://localhost:5173，代理到 :8000
 ```
 
-打开 `http://127.0.0.1:8000`，用 `admin / admin123` 登录。Overview 应显示 Gateway
-`streaming`（模拟源）。生产模式前端由 API 直接服务（`frontend/dist` 静态目录）。
+打开 `http://127.0.0.1:8000`，用 `admin / admin123` 登录。总览 应显示 Gateway
+“行情推送中”（模拟源）。生产模式前端由 API 直接服务（`frontend/dist` 静态目录）。
 
 > 未设 `DATABASE_URL` 时自动使用 `data/app.db`（SQLite）。模拟源标签为
 > `simulate`，数据仅用于链路开发验证，不构成市场样本。
@@ -83,7 +83,7 @@ cd frontend && npm install && npm run dev    # http://localhost:5173，代理到
 
 依赖 Linux x86_64、Docker Engine 与 Compose 插件。默认方案：**caddy 容器做
 公网 HTTPS 入口**（自动申请/续期 Let's Encrypt 证书），浏览器直接访问
-`https://<域名>`，账号密码登录。
+`https://www.<域名>`，账号密码登录。
 
 1. **准备**：域名 A 记录指向服务器 IP；阿里云安全组放行 **80/443**（保留 22）；
    从 [SimNow 官方 API 下载页](https://www.simnow.com.cn/static/apiDownload.action)
@@ -104,11 +104,11 @@ cd frontend && npm install && npm run dev    # http://localhost:5173，代理到
    docker compose --profile simulate up -d --build --wait
    ```
 
-4. **访问**：浏览器打开 `https://<域名>`（首次签发证书约 1 分钟），用 `.env`
+4. **访问**：浏览器打开 `https://www.<域名>`（首次签发证书约 1 分钟），用 `.env`
    中的 admin 账号登录。公网安全：登录按 IP 限流（5 次失败/5 分钟）、
    Argon2 密码哈希、HttpOnly+Secure Cookie、HSTS/CSP 安全头。
 
-5. **接入 SimNow 行情**：登录终端 → **System** 页 → 填写行情前置 / BrokerID /
+5. **接入 SimNow 行情**：登录终端 → **系统管理** 页 → 填写行情前置 / BrokerID /
    SimNow 账号 / 订阅合约（如 `C2611`）→ Connect。凭据默认只存网关进程内存；
    勾选 "remember" 才写入数据卷 0600 文件（明文，主机管理员可读）。
 

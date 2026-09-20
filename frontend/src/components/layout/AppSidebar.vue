@@ -14,15 +14,16 @@ interface NavItem {
 const route = useRoute()
 
 const navItems: NavItem[] = [
-  { label: 'Overview', to: '/overview', icon: 'grid' },
-  { label: 'Markets', to: '/markets', icon: 'list' },
-  { label: 'Workspace', to: '/workspace/c2611', icon: 'chart' },
-  { label: 'Microstructure', to: '/microstructure', icon: 'layers' },
-  { label: 'Research', to: '/research', icon: 'flask' },
-  { label: 'Strategies', to: '/strategies', icon: 'target', feature: 'strategies' },
-  { label: 'Trading', to: '/trading', icon: 'dollar', feature: 'trading' },
-  { label: 'Models', to: '/models', icon: 'cpu', feature: 'models' },
-  { label: 'System', to: '/system', icon: 'settings' },
+  { label: '总览', to: '/overview', icon: 'grid' },
+  { label: '行情市场', to: '/markets', icon: 'list' },
+  { label: '合约工作台', to: '/workspace/c2611', icon: 'chart' },
+  { label: '微观结构', to: '/microstructure', icon: 'layers' },
+  { label: '数据与报告', to: '/research', icon: 'flask' },
+  { label: '策略', to: '/strategies', icon: 'target', feature: 'strategies' },
+  { label: '交易', to: '/trading', icon: 'dollar', feature: 'trading' },
+  { label: '模型', to: '/models', icon: 'cpu', feature: 'models' },
+  { label: '飞书推送', to: '/monitor', icon: 'bell' },
+  { label: '采集与设置', to: '/system', icon: 'settings' },
 ]
 
 const visibleItems = computed(() =>
@@ -44,7 +45,7 @@ function isActive(to: string): boolean {
       </svg>
       <div class="brand-text">
         <span class="brand-name">MICROTERM</span>
-        <span class="brand-sub">Bid-Ask Bounce</span>
+        <span class="brand-sub">买卖价反弹研究</span>
       </div>
     </div>
 

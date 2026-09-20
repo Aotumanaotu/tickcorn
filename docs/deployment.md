@@ -1,7 +1,7 @@
 # 部署指南（新加坡 ECS / 任意 Linux x86_64 服务器）
 
 默认方案：**域名直连（HTTPS）**——caddy 容器做公网入口，自动申请/续期
-Let's Encrypt 证书，浏览器直接访问 `https://<域名>` 用账号密码登录。
+Let's Encrypt 证书，浏览器直接访问 `https://www.<域名>` 用账号密码登录。
 安全边界：后端 api/gateway 不直接暴露公网；密码 Argon2 哈希；登录接口
 按 IP 限流（默认 5 次失败 / 5 分钟）；Refresh Cookie HttpOnly + Secure +
 SameSite=strict；CSP/HSTS 安全头。
@@ -10,11 +10,13 @@ SameSite=strict；CSP/HSTS 安全头。
 
 ## 域名直连的前置条件
 
-1. **DNS**：域名 A 记录指向服务器公网 IP（如 `47.82.105.121`）。
+1. **DNS**：裸域名（`@`）与 `www` 的 A 记录均指向服务器公网 IP（如 `47.82.105.121`）。
 2. **安全组**：阿里云控制台 → ECS 实例 → 安全组 → 入方向添加规则：
    - 80/443（TCP），源 0.0.0.0/0（80 用于证书签发与 HTTP→HTTPS 跳转）
    - 22（TCP）保留给 SSH 管理
-3. `.env` 中配置 `DOMAIN` 与 `ACME_EMAIL`（证书通知邮箱）。
+3. `.env` 中配置 `DOMAIN=tickcorn.tech`（裸域名，不加 `www` 或协议）与 `ACME_EMAIL`（证书通知邮箱）。
+   正式入口为 `https://www.tickcorn.tech`，裸域名自动跳转到带 `www` 的地址，并保留路径与查询参数。
+   两个域名均由 Caddy 自动申请证书。
 
 ## 从旧版（corn-tick 面板）升级
 
@@ -37,8 +39,8 @@ cp .env.example .env && vim .env
 bash scripts/deploy.sh
 
 # 6. 验证
-docker compose ps                                        # 四服务 healthy
-curl -s https://<域名>/api/v1/health                     # 证书签发需 ~1 分钟
+docker compose ps                                        # db/api/gateway healthy，caddy Up
+curl -s https://www.<域名>/api/v1/health                     # 证书签发需 ~1 分钟
 ```
 
 说明：
@@ -59,7 +61,7 @@ curl -s https://<域名>/api/v1/health                     # 证书签发需 ~1 
   ```
 
 - **登录方式变化**：旧版面板令牌（dashboard-token）已废弃，浏览器直接
-  `https://<域名>` 账号登录（`.env` 中 ADMIN_USERNAME/ADMIN_PASSWORD
+  `https://www.<域名>` 账号登录（`.env` 中 ADMIN_USERNAME/ADMIN_PASSWORD
   引导的首个管理员）。
 - **旧飞书 monitor**：尚未迁移到新 API（计划 F1.5），暂不随 compose 启动。
 - **回滚**：`docker compose down --remove-orphans && git checkout e6e90d1
@@ -91,28 +93,28 @@ bash scripts/deploy.sh
 | `caddy` | 公网 HTTPS 入口（80/443），自动证书，反代 api；数据卷 `caddy-data` |
 
 镜像内含自检（`python -m app selftest`，CTP shim 布局校验）。容器健康仅表示
-HTTP 服务可用；行情连接状态、错误码、数据更新时间需在网页 System/Overview 确认。
+HTTP 服务可用；行情连接状态、错误码、数据更新时间需在网页 系统管理 / 总览 确认。
 
 ## 2. 验收清单
 
 ```bash
-docker compose ps                                     # db/api/gateway/caddy healthy
-curl -s https://<域名>/api/v1/health                  # {"status":"ok",...}
+docker compose ps                                     # db/api/gateway healthy，caddy Up
+curl -s https://www.<域名>/api/v1/health                  # {"status":"ok",...}
 ```
 
-浏览器打开 `https://<域名>`（首次启动 caddy 需约 1 分钟签发证书）：
+浏览器打开 `https://www.<域名>`（首次启动 caddy 需约 1 分钟签发证书）：
 
 - [ ] 未登录访问 `/overview` 被重定向到 `/login`
 - [ ] admin 登录成功，右上角显示角色徽章；浏览器地址栏为有效证书（无告警）
-- [ ] Overview 显示 Gateway 状态（未连接行情时应为 `idle`）
-- [ ] System 页填写 SimNow 配置 → Connect → Overview 变为 `streaming`，
+- [ ] 总览 显示 行情网关状态（未连接行情时应为 “待连接”）
+- [ ] 系统管理页填写 SimNow 配置 → 连接行情网关 → 总览 变为 “行情推送中”，
       Message/Events 计数增长（真实行情验收，不可用 healthy 状态替代）
 - [ ] 连续输错密码 5 次后返回 429（登录限流生效）
 - [ ] `docker compose exec api python -m app verify` 通过（归档完整性）
 
 ## 3. SimNow 行情接入
 
-登录 → System → Gateway 连接表单：
+登录 → 系统管理 → 行情网关 连接表单：
 
 - **fronts**：行情前置（以 SimNow 登录后官方页面为准，每行一个）
 - **broker_id** / **user** / **password**：SimNow 账号
@@ -161,8 +163,8 @@ bash scripts/deploy.sh          # 重新构建并滚动重启
 |---|---|
 | https 访问不了/证书告警 | 安全组 80/443 是否放行；DNS 是否解析到本机；`docker compose logs caddy` |
 | api 不健康 | `docker compose logs api`（多为 db 未就绪，compose 会自动重试） |
-| Overview 显示 gateway offline | `docker compose logs gateway`；socket 卷是否共享 |
-| 行情连不上 | System 页看 detail；确认前置地址与 SimNow 账号；`ctp_flow` 目录有连接流水 |
+| 总览 显示 网关离线 | `docker compose logs gateway`；socket 卷是否共享 |
+| 行情连不上 | 系统管理页看 detail；确认前置地址与 SimNow 账号；`ctp_flow` 目录有连接流水 |
 | 数据缺失 | `python -m app info` 看分区；`python -m app verify` 校验哈希 |
 
 ## 5. 备选：SSH 隧道访问（无域名场景）

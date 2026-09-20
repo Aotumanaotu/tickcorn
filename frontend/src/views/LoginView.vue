@@ -18,21 +18,21 @@ const submitting = ref(false)
 
 async function submit(): Promise<void> {
   if (!username.value.trim() || !password.value) {
-    error.value = 'Please enter username and password.'
+    error.value = '请输入用户名和密码。'
     return
   }
   submitting.value = true
   error.value = ''
   try {
     await auth.login(username.value.trim(), password.value)
-    appToast.success(`Signed in as ${auth.user?.username}`)
+    appToast.success(`已登录：${auth.user?.username}`)
     const redirect = (route.query.redirect as string) || '/overview'
     router.push(redirect)
   } catch (err) {
     error.value =
       err instanceof Error && err.message
-        ? `Sign-in failed: ${err.message}`
-        : 'Sign-in failed. Check your credentials.'
+        ? `登录失败：${err.message}`
+        : '登录失败，请检查用户名和密码。'
   } finally {
     submitting.value = false
   }
@@ -44,7 +44,7 @@ async function submit(): Promise<void> {
     <button
       class="theme-toggle icon-btn"
       type="button"
-      :aria-label="theme.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
+      :aria-label="theme.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
       @click="theme.toggle()"
     >
       <svg
@@ -71,24 +71,24 @@ async function submit(): Promise<void> {
           <path d="M2 21h20" stroke-opacity=".45" />
         </svg>
         <h1 class="brand-name">MICROTERM</h1>
-        <p class="brand-sub">Bid-Ask Bounce Research Terminal</p>
+        <p class="brand-sub">买卖价反弹研究终端</p>
       </div>
 
       <form class="form" @submit.prevent="submit">
         <div class="field">
-          <label for="login-username">Username</label>
+          <label for="login-username">用户名</label>
           <input
             id="login-username"
             v-model="username"
             class="input"
             type="text"
             autocomplete="username"
-            placeholder="e.g. admin"
+            placeholder="例如：admin"
             :disabled="submitting"
           />
         </div>
         <div class="field">
-          <label for="login-password">Password</label>
+          <label for="login-password">密码</label>
           <input
             id="login-password"
             v-model="password"
@@ -103,11 +103,11 @@ async function submit(): Promise<void> {
         <p v-if="error" class="error">{{ error }}</p>
 
         <button class="btn btn-primary submit" type="submit" :disabled="submitting">
-          {{ submitting ? 'Signing in…' : 'Sign in' }}
+          {{ submitting ? '正在登录…' : '登录' }}
         </button>
       </form>
 
-      <p class="foot">MICROTERM v0.3.0 · CTP market data research build</p>
+      <p class="foot">MICROTERM v0.3.0 · CTP 行情研究版</p>
     </div>
   </div>
 </template>

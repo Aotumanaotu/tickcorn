@@ -72,7 +72,7 @@ export const useInstrumentsStore = defineStore('instruments', () => {
   /** Ensure at least one watchlist exists; returns the primary one. */
   async function ensureWatchlist(): Promise<Watchlist> {
     if (!watchlists.value.length) {
-      const created = await marketApi.createWatchlist('Default')
+      const created = await marketApi.createWatchlist('默认自选')
       watchlists.value = [created]
     }
     return watchlists.value[0]

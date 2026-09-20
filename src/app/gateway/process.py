@@ -69,6 +69,7 @@ class _GatewayRuntime:
         self._simulate_rate_hz = float(simulate_rate_hz)
         self._simulate_seed = int(simulate_seed)
 
+        self._raw_source = "ctp"
         self._state = CONN_IDLE
         self._detail = ""
         self._instruments: dict[str, str] = {}
@@ -178,6 +179,7 @@ class _GatewayRuntime:
         if self._state not in (CONN_IDLE, CONN_DISCONNECTED, CONN_FAILED):
             raise ValueError("当前状态不允许 connect")
         params = validate_connect_payload(payload)
+        self._raw_source = "ctp" if params["source_kind"] == "unspecified" else "ctp:" + params["source_kind"]
         instruments = params["instruments"]
         for inst in instruments:
             try:
@@ -194,7 +196,7 @@ class _GatewayRuntime:
         self._batch_id = self._archiver.begin_batch(
             fronts=params["fronts"], broker_id=params["broker_id"],
             user_masked=mask_user(params["user"]), instruments=instruments,
-            raw_source="ctp", config_hash=self._config.config_hash)
+            raw_source=self._raw_source, config_hash=self._config.config_hash)
         try:
             client = CtpMdClient(
                 handler=self, flow_dir=self._config.paths.ctp_flow_dir,
@@ -304,7 +306,7 @@ class _GatewayRuntime:
         if not row.get("batch_id"):
             row["batch_id"] = self._batch_id
         if not row.get("raw_source"):
-            row["raw_source"] = "simulate" if self._simulate else "ctp"
+            row["raw_source"] = "simulate" if self._simulate else self._raw_source
         if not row.get("trading_session"):
             row["trading_session"] = self._config.session_of(
                 str(row.get("update_time") or "00:00:00"))
@@ -456,7 +458,7 @@ class _GatewayRuntime:
             local_receive_time_ns=recv_ns,
             batch_id=self._batch_id or "",
             trading_session=self._config.session_of(update_time),
-            raw_source="ctp")
+            raw_source=self._raw_source)
         row["instrument_id"] = inst
         await self._process_row(row)
 
@@ -486,6 +488,7 @@ class _GatewayRuntime:
             "last_event_ns": self._last_event_ns,
             "events_published": self._events_published,
             "simulate": self._simulate,
+            "raw_source": "simulate" if self._simulate else self._raw_source,
         }
 
     async def _broadcast_status(self) -> None:

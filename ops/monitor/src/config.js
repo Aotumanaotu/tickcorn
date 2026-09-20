@@ -36,6 +36,8 @@ export function loadConfig(env = process.env) {
     dryRun: asBool(env.DRY_RUN, false),
     testRequest: 0,
 
+    apiMode: env.API_MODE || "legacy",
+
     // Target service
     dashboardUrl: (env.DASHBOARD_URL || "http://127.0.0.1:8800").replace(/\/+$/, ""),
     dashboardToken: env.DASHBOARD_TOKEN || "",

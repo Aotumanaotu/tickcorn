@@ -3,13 +3,13 @@ import PageContainer from '@/components/layout/PageContainer.vue'
 </script>
 
 <template>
-  <PageContainer title="Page not found">
+  <PageContainer title="页面不存在">
     <div class="nf card">
       <div class="code mono">404</div>
-      <h2 class="title">Page not found</h2>
-      <p class="hint">The route you requested does not exist in MICROTERM.</p>
+      <h2 class="title">页面不存在</h2>
+      <p class="hint">找不到你访问的页面，请检查地址或返回总览。</p>
       <router-link class="btn btn-primary" :to="{ name: 'overview' }">
-        Back to Overview
+        返回总览
       </router-link>
     </div>
   </PageContainer>

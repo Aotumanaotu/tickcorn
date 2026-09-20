@@ -1,6 +1,6 @@
 import { zonedParts, zonedString } from "./time.js";
 
-const GOOD_CONNECTION = new Set(["logged_in"]);
+const GOOD_CONNECTION = new Set(["logged_in", "streaming"]);
 const WARN_CONNECTION = new Set([
   "connected",
   "waiting_front",
@@ -46,7 +46,7 @@ export function buildReport(data, cfg, now = new Date()) {
   }
   if (data.state && !data.state.ok) {
     if (data.state.status === 401) bump("critical", "面板令牌无效或被拒绝 (401)");
-    else bump("critical", `读取 /api/state 失败 (${data.state.error || "status " + data.state.status})`);
+    else bump("critical", `读取采集状态失败 (${data.state.error || "status " + data.state.status})`);
   }
   if (state && !manager.running) {
     bump("warn", "采集未在运行（容器重启后需从网页重新开始）");
@@ -58,7 +58,7 @@ export function buildReport(data, cfg, now = new Date()) {
   if (data.disk?.warn) {
     bump("warn", `磁盘空间紧张: /data 已用 ${data.disk.usedPercent}%`);
   }
-  if (data.data?.hasStaging) {
+  if (data.data?.hasStaging && !manager.running) {
     bump("warn", "存在未 finalize 的 staging 分片");
   }
   if (manager.running && data.expectedDays?.length && data.data?.exists) {
@@ -77,6 +77,9 @@ export function buildReport(data, cfg, now = new Date()) {
   const lines = [];
   lines.push(`【${cfg.title}】状态简报 ${zonedParts(cfg.tz, now).hhmm}`);
   lines.push("");
+  if (state?.simulate) lines.push("数据来源：本地模拟（仅联调，不作为市场样本）");
+  if (state?.source) lines.push(`采集来源：${state.source}`);
+  if (state?.metrics_scope) lines.push(`实时统计范围：${state.metrics_scope}`);
   lines.push(`总体: ${icon} ${statusText}`);
   lines.push(
     data.health?.ok

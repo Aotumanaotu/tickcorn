@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { stateLabel, modeLabel, percent } from '@/labels'
 import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -9,12 +10,17 @@ import InstrumentName from '@/components/market/InstrumentName.vue'
 import PriceText from '@/components/market/PriceText.vue'
 import { useInstrumentsStore } from '@/stores/instruments'
 import { useRealtimeStore } from '@/stores/realtime'
+import TickChart from '@/components/market/TickChart.vue'
+import MicroEvents from '@/components/market/MicroEvents.vue'
+import { useSystemStore } from '@/stores/system'
 import { wsMarket } from '@/ws/client'
 
 const route = useRoute()
 const router = useRouter()
 const instruments = useInstrumentsStore()
 const realtime = useRealtimeStore()
+const system = useSystemStore()
+const metrics = computed(() => system.status?.realtime[instrumentId.value])
 
 const instrumentId = computed(() =>
   String(route.params.instrumentId ?? '').toUpperCase(),
@@ -74,12 +80,12 @@ function openInstrument(id: string): void {
   <PageContainer>
     <template #actions>
       <ConnectionBadge
-        :label="`FEED ${feedState.toUpperCase()}`"
+        :label="`行情连接：${stateLabel(feedState)}`"
         :tone="feedState === 'open' ? 'accent' : feedState === 'idle' ? 'muted' : 'warn'"
       />
       <ConnectionBadge
         v-if="dataMode"
-        :label="dataMode.toUpperCase()"
+        :label="modeLabel(dataMode)"
         :tone="dataMode === 'live' ? 'up' : 'warn'"
       />
     </template>
@@ -91,7 +97,7 @@ function openInstrument(id: string): void {
       </div>
       <div class="quote-grid num">
         <div class="q">
-          <span class="q-label">Last</span>
+          <span class="q-label">最新价</span>
           <PriceText
             :value="quoteData?.last ?? null"
             :decimals="decimals"
@@ -101,21 +107,21 @@ function openInstrument(id: string): void {
           />
         </div>
         <div class="q">
-          <span class="q-label">Bid 1</span>
+          <span class="q-label">买一</span>
           <PriceText :value="quoteData?.bid1 ?? null" :decimals="decimals" size="lg" />
           <span class="q-vol mono">{{ quoteData?.bid_volume1 ?? '—' }}</span>
         </div>
         <div class="q">
-          <span class="q-label">Ask 1</span>
+          <span class="q-label">卖一</span>
           <PriceText :value="quoteData?.ask1 ?? null" :decimals="decimals" size="lg" />
           <span class="q-vol mono">{{ quoteData?.ask_volume1 ?? '—' }}</span>
         </div>
         <div class="q">
-          <span class="q-label">Spread</span>
+          <span class="q-label">买卖价差</span>
           <PriceText :value="quoteData?.spread ?? null" :decimals="decimals" size="lg" />
         </div>
         <div class="q">
-          <span class="q-label">Mid</span>
+          <span class="q-label">中间价</span>
           <PriceText :value="quoteData?.mid ?? null" :decimals="decimals" size="lg" />
         </div>
       </div>
@@ -123,7 +129,7 @@ function openInstrument(id: string): void {
 
     <div class="trio">
       <div class="card panel">
-        <div class="card-title"><span>Watchlist</span></div>
+        <div class="card-title"><span>自选合约</span></div>
         <div v-if="watchItems.length" class="watch-list">
           <button
             v-for="item in watchItems"
@@ -139,42 +145,31 @@ function openInstrument(id: string): void {
         </div>
         <EmptyState
           v-else
-          title="Empty watchlist"
-          hint="Add contracts from the Markets page."
+          title="暂无自选合约"
+          hint="前往行情市场添加自选合约。"
         />
       </div>
 
       <div class="card panel main-panel">
-        <div class="card-title"><span>Chart</span></div>
-        <EmptyState
-          icon="chart"
-          title="Realtime charts arrive in F2"
-          hint="Tick-level price & bid/ask charts powered by lightweight-charts will render here."
-        />
+        <div class="card-title"><span>行情图表</span></div>
+        <TickChart :instrument-id="instrumentId" />
       </div>
 
       <div class="card panel">
-        <div class="card-title"><span>Intelligence Panel</span></div>
-        <EmptyState
-          icon="layers"
-          title="Intelligence pending"
-          hint="Bounce ratio, quote intensity and trade-sign analytics will stream here in F3."
-        />
+        <div class="card-title"><span>分析面板</span></div>
+        <div class="card-body analysis-stats"><p>反弹占比：{{ percent(metrics?.bounce_ratio) }}</p><p>真实移动占比：{{ percent(metrics?.genuine_move_ratio) }}</p><p>1-tick 变化：{{ metrics?.one_tick_last_changes ?? '—' }}</p><p>快照 / 分钟：{{ metrics?.message_rate_per_min ?? '—' }}</p><p class="dim">最近 200 次转换的 1-tick 子集；完整统计请生成归档报告。</p></div>
       </div>
     </div>
 
     <div class="card timeline">
-      <div class="card-title"><span>Timeline</span></div>
-      <EmptyState
-        icon="clock"
-        title="Event timeline arrives in F3"
-        hint="Classified microstructure events (bid-ask bounce, jumps) will scroll here in realtime."
-      />
+      <div class="card-title"><span>事件时间轴</span></div>
+      <MicroEvents :instrument-id="instrumentId" />
     </div>
   </PageContainer>
 </template>
 
 <style scoped>
+.analysis-stats p { margin-bottom: 12px; line-height: 1.6; }
 .market-header {
   display: flex;
   align-items: center;

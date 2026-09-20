@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { roleLabel, stateLabel } from '@/labels'
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { appToast } from '@/components/common/appToast'
@@ -18,7 +19,7 @@ const canManageUsers = computed(() => auth.can('MANAGE_USER'))
 
 // --- gateway ----------------------------------------------------------------
 
-const gatewayConnected = computed(() => system.gatewayConnected)
+const gatewayConnected = computed(() => Boolean(system.gateway?.batch_id) || ['connecting', 'connected', 'streaming'].includes(system.gatewayState))
 const gatewayState = computed(() => system.gatewayState)
 
 const gatewayStateDot = computed<'ok' | 'warn' | 'error' | 'idle'>(() => {
@@ -27,11 +28,12 @@ const gatewayStateDot = computed<'ok' | 'warn' | 'error' | 'idle'>(() => {
 })
 
 const gatewayInstruments = computed(
-  () => system.gateway?.instruments?.join(', ') || '—',
+  () => Object.keys(system.gateway?.instruments ?? {}).join(', ') || '—',
 )
 
 const form = reactive({
-  fronts: 'tcp://180.168.146.187:10131\ntcp://180.168.146.187:10111',
+  fronts: '',
+  source_kind: 'simnow_standard',
   broker_id: '',
   user: '',
   password: '',
@@ -52,23 +54,24 @@ async function connect(): Promise<void> {
     .map((s) => s.trim())
     .filter(Boolean)
   if (!fronts.length || !form.broker_id || !form.user || !form.password || !instruments.length) {
-    appToast.error('All gateway fields except "remember" are required.')
+    appToast.error('请完整填写行情前置地址、经纪商代码、账号、密码和订阅合约。')
     return
   }
   connecting.value = true
   try {
     await system.connectGateway({
       fronts,
+      source_kind: form.source_kind,
       broker_id: form.broker_id,
       user: form.user,
       password: form.password,
       instruments,
       remember: form.remember,
     })
-    appToast.success('Gateway connect command sent.')
+    appToast.success('已发送网关连接指令。')
     form.password = ''
   } catch (err) {
-    appToast.error(err instanceof Error ? err.message : 'Gateway connect failed')
+    appToast.error(err instanceof Error ? err.message : '网关连接失败')
   } finally {
     connecting.value = false
   }
@@ -78,9 +81,9 @@ async function disconnect(): Promise<void> {
   disconnecting.value = true
   try {
     await system.disconnectGateway()
-    appToast.info('Gateway disconnect command sent.')
+    appToast.info('已发送网关断开指令。')
   } catch (err) {
-    appToast.error(err instanceof Error ? err.message : 'Gateway disconnect failed')
+    appToast.error(err instanceof Error ? err.message : '网关断开失败')
   } finally {
     disconnecting.value = false
   }
@@ -106,13 +109,13 @@ async function loadUsers(): Promise<void> {
     users.value = await systemApi.users()
     usersLoaded.value = true
   } catch (err) {
-    appToast.error(err instanceof Error ? err.message : 'Failed to load users')
+    appToast.error(err instanceof Error ? err.message : '加载用户列表失败')
   }
 }
 
 async function createUser(): Promise<void> {
   if (!userForm.username.trim() || userForm.password.length < 6) {
-    appToast.error('Username and a password of at least 6 characters are required.')
+    appToast.error('请填写用户名，并设置至少 6 位的密码。')
     return
   }
   creating.value = true
@@ -124,11 +127,11 @@ async function createUser(): Promise<void> {
       role: userForm.role,
     })
     users.value = [...users.value, created].sort((a, b) => a.id - b.id)
-    appToast.success(`User "${created.username}" created.`)
+    appToast.success(`用户“${created.username}”已创建。`)
     userForm.username = ''
     userForm.password = ''
   } catch (err) {
-    appToast.error(err instanceof Error ? err.message : 'Failed to create user')
+    appToast.error(err instanceof Error ? err.message : '创建用户失败')
   } finally {
     creating.value = false
   }
@@ -137,7 +140,7 @@ async function createUser(): Promise<void> {
 function formatDate(iso: string | null): string {
   if (!iso) return '—'
   try {
-    return new Date(iso).toLocaleString()
+    return new Date(iso).toLocaleString('zh-CN')
   } catch {
     return iso
   }
@@ -146,39 +149,40 @@ function formatDate(iso: string | null): string {
 
 <template>
   <PageContainer
-    title="System"
-    :subtitle="`Gateway control and account administration · backend v${system.version || '—'}`"
+    title="系统管理"
+    :subtitle="`行情网关与账号管理 · 服务版本 v${system.version || '—'}`"
   >
     <div class="layout">
       <div class="col">
         <div class="card">
           <div class="card-title">
-            <span>CTP Gateway</span>
+            <span>CTP 行情网关</span>
             <div class="title-right">
               <ConnectionBadge
                 v-if="system.simulate"
-                label="SIM"
+                label="模拟行情"
                 tone="warn"
               />
-              <StatusDot :state="gatewayStateDot" :label="gatewayState" />
+              <StatusDot :state="gatewayStateDot" :label="stateLabel(gatewayState)" />
             </div>
           </div>
           <div class="card-body gw-body">
+            <p v-if="system.gateway?.detail" class="dim">{{ system.gateway.detail }}</p>
             <dl class="kv num">
-              <div class="row"><dt>Ingest link</dt><dd>{{ system.gatewayConnected ? 'connected' : 'down' }}</dd></div>
-              <div class="row"><dt>Events published</dt><dd>{{ (system.gateway?.events_published ?? 0).toLocaleString() }}</dd></div>
-              <div class="row"><dt>Batch ID</dt><dd class="mono">{{ system.gateway?.batch_id ?? '—' }}</dd></div>
-              <div class="row instruments"><dt>Subscribed</dt><dd class="mono">{{ gatewayInstruments }}</dd></div>
+              <div class="row"><dt>数据接收连接</dt><dd>{{ system.gatewayConnected ? '已连接' : '未连接' }}</dd></div>
+              <div class="row"><dt>已发布事件</dt><dd>{{ (system.gateway?.events_published ?? 0).toLocaleString('zh-CN') }}</dd></div>
+              <div class="row"><dt>批次编号</dt><dd class="mono">{{ system.gateway?.batch_id ?? '—' }}</dd></div>
+              <div class="row instruments"><dt>已订阅合约</dt><dd class="mono">{{ gatewayInstruments }}</dd></div>
             </dl>
 
-            <div v-if="gatewayConnected" class="connected-row">
+            <div v-if="gatewayConnected && canManageGateway" class="connected-row">
               <button
                 class="btn btn-danger"
                 type="button"
                 :disabled="disconnecting"
                 @click="disconnect"
               >
-                {{ disconnecting ? 'Disconnecting…' : 'Disconnect' }}
+                {{ disconnecting ? '正在断开…' : '停止采集并归档' }}
               </button>
             </div>
 
@@ -186,42 +190,50 @@ function formatDate(iso: string | null): string {
               <div v-if="canManageGateway">
                 <hr class="divider form-divider" />
                 <form class="gw-form" @submit.prevent="connect">
+                  <p class="dim">连接后自动记录原始 tick 快照。停止采集时会整理归档，完成后可前往“数据与报告”分析导出。</p>
                   <div class="field">
-                    <label for="gw-fronts">Front addresses (one per line)</label>
-                    <textarea id="gw-fronts" v-model="form.fronts" class="textarea" rows="3" />
+                    <label for="gw-source">数据来源</label>
+                    <select id="gw-source" v-model="form.source_kind" class="select">
+                      <option value="simnow_standard">SimNow 标准仿真环境</option>
+                      <option value="simnow_test">SimNow API 测试环境（仅联调）</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="gw-fronts">行情前置地址（每行一个）</label>
+                    <textarea id="gw-fronts" v-model="form.fronts" class="textarea" rows="3" placeholder="填写 SimNow 官方页面提供的行情前置地址，格式 tcp://主机:端口" />
                   </div>
                   <div class="two-col">
                     <div class="field">
-                      <label for="gw-broker">Broker ID</label>
+                      <label for="gw-broker">经纪商代码</label>
                       <input id="gw-broker" v-model="form.broker_id" class="input" type="text" placeholder="9999" />
                     </div>
                     <div class="field">
-                      <label for="gw-user">User</label>
+                      <label for="gw-user">账号</label>
                       <input id="gw-user" v-model="form.user" class="input" type="text" autocomplete="off" />
                     </div>
                   </div>
                   <div class="field">
-                    <label for="gw-password">Password</label>
+                    <label for="gw-password">密码</label>
                     <input id="gw-password" v-model="form.password" class="input" type="password" autocomplete="new-password" />
                   </div>
                   <div class="field">
-                    <label for="gw-instruments">Instruments (comma separated)</label>
+                    <label for="gw-instruments">订阅合约（以逗号分隔）</label>
                     <input id="gw-instruments" v-model="form.instruments" class="input mono" type="text" placeholder="c2611, m2601" />
                   </div>
                   <label class="checkbox">
                     <input v-model="form.remember" type="checkbox" />
-                    Remember credentials (stored server-side)
+                    记住凭据（明文保存在服务器）
                   </label>
                   <button class="btn btn-primary" type="submit" :disabled="connecting">
-                    {{ connecting ? 'Connecting…' : 'Connect Gateway' }}
+                    {{ connecting ? '正在连接…' : '连接并开始记录' }}
                   </button>
                 </form>
               </div>
               <div v-else class="no-perm">
                 <EmptyState
                   icon="lock"
-                  title="Insufficient permissions"
-                  hint="Only administrators can control the CTP gateway (MANAGE_USER required)."
+                  title="权限不足"
+                  hint="仅管理员可以控制 CTP 行情网关。"
                 />
               </div>
             </template>
@@ -231,22 +243,22 @@ function formatDate(iso: string | null): string {
 
       <div class="col">
         <div class="card">
-          <div class="card-title"><span>Users</span></div>
+          <div class="card-title"><span>用户管理</span></div>
           <template v-if="canManageUsers">
             <div v-if="users.length" class="table-wrap">
               <table class="table">
                 <thead>
-                  <tr><th>User</th><th>Role</th><th>Status</th><th>Created</th></tr>
+                  <tr><th>账号</th><th>角色</th><th>状态</th><th>创建时间</th></tr>
                 </thead>
                 <tbody>
                   <tr v-for="u in users" :key="u.id">
                     <td>
                       <span class="username">{{ u.username }}</span>
-                      <span v-if="u.id === auth.user?.id" class="you badge">you</span>
+                      <span v-if="u.id === auth.user?.id" class="you badge">当前用户</span>
                     </td>
-                    <td><span class="badge" :class="u.role === 'ADMIN' ? 'badge-accent' : ''">{{ u.role }}</span></td>
+                    <td><span class="badge" :class="u.role === 'ADMIN' ? 'badge-accent' : ''">{{ roleLabel(u.role) }}</span></td>
                     <td>
-                      <StatusDot :state="u.is_active ? 'ok' : 'idle'" :label="u.is_active ? 'active' : 'disabled'" />
+                      <StatusDot :state="u.is_active ? 'ok' : 'idle'" :label="u.is_active ? '启用' : '停用'" />
                     </td>
                     <td class="dim num">{{ formatDate(u.created_at) }}</td>
                   </tr>
@@ -255,30 +267,30 @@ function formatDate(iso: string | null): string {
             </div>
             <EmptyState
               v-else-if="usersLoaded"
-              title="No users yet"
-              hint="Create the first account with the form below."
+              title="暂无用户"
+              hint="使用下方表单创建账号。"
             />
 
             <div class="card-body">
               <form class="user-form" @submit.prevent="createUser">
                 <div class="three-col">
                   <div class="field">
-                    <label for="nu-username">Username</label>
+                    <label for="nu-username">用户名</label>
                     <input id="nu-username" v-model="userForm.username" class="input" type="text" autocomplete="off" />
                   </div>
                   <div class="field">
-                    <label for="nu-password">Password</label>
-                    <input id="nu-password" v-model="userForm.password" class="input" type="password" autocomplete="new-password" placeholder="min 6 chars" />
+                    <label for="nu-password">密码</label>
+                    <input id="nu-password" v-model="userForm.password" class="input" type="password" autocomplete="new-password" placeholder="至少 6 位" />
                   </div>
                   <div class="field">
-                    <label for="nu-role">Role</label>
+                    <label for="nu-role">角色</label>
                     <select id="nu-role" v-model="userForm.role" class="select">
-                      <option v-for="r in ROLE_OPTIONS" :key="r" :value="r">{{ r }}</option>
+                      <option v-for="r in ROLE_OPTIONS" :key="r" :value="r">{{ roleLabel(r) }}</option>
                     </select>
                   </div>
                 </div>
                 <button class="btn btn-primary" type="submit" :disabled="creating">
-                  {{ creating ? 'Creating…' : 'Create User' }}
+                  {{ creating ? '正在创建…' : '创建用户' }}
                 </button>
               </form>
             </div>
@@ -286,8 +298,8 @@ function formatDate(iso: string | null): string {
           <EmptyState
             v-else
             icon="lock"
-            title="Insufficient permissions"
-            hint="User administration requires the MANAGE_USER permission (admin role)."
+            title="权限不足"
+            hint="仅管理员可以管理用户账号。"
           />
         </div>
       </div>

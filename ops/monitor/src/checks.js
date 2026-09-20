@@ -42,15 +42,15 @@ export function readDashboardToken(file, fallback) {
   }
 }
 
-export async function checkHealth(baseUrl, timeoutMs) {
-  return httpGetJson(`${baseUrl}/healthz`, {}, timeoutMs);
+export async function checkHealth(baseUrl, timeoutMs, apiMode = "legacy") {
+  return httpGetJson(`${baseUrl}${apiMode === "microterm" ? "/api/v1/health" : "/healthz"}`, {}, timeoutMs);
 }
 
-export async function checkState(baseUrl, token, timeoutMs) {
+export async function checkState(baseUrl, token, timeoutMs, apiMode = "legacy") {
   if (!token) return { ok: false, status: 0, error: "缺少面板令牌" };
   return httpGetJson(
-    `${baseUrl}/api/state`,
-    { "X-Auth-Token": token },
+    `${baseUrl}${apiMode === "microterm" ? "/api/v1/monitor/state" : "/api/state"}`,
+    { [apiMode === "microterm" ? "X-Monitor-Token" : "X-Auth-Token"]: token },
     timeoutMs,
   );
 }

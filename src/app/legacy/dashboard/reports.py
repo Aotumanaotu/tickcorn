@@ -16,7 +16,7 @@ from app.common.private_files import write_private_json
 from app.storage.parquet_store import RawParquetStore
 
 logger = get_logger("dashboard.reports")
-SOURCES = {"simnow_test": "SimNow API 测试环境", "simnow_standard": "SimNow 标准仿真环境"}
+SOURCES = {"ctp": "CTP 旧数据（环境未标记）", "simulate": "本地模拟数据（仅联调）", "simnow_test": "SimNow API 测试环境", "simnow_standard": "SimNow 标准仿真环境"}
 DOWNLOADS = {"html": ("summary.html", "text/html; charset=utf-8"),
              "md": ("summary.md", "text/markdown; charset=utf-8"),
              "zip": ("report.zip", "application/zip")}
@@ -128,7 +128,7 @@ class ReportStore:
             artifacts = directory / "artifacts"
             from app.analysis.session_report import AnalysisOptions, run_analysis
             options = AnalysisOptions(
-                raw_source="ctp:" + job["source"],
+                raw_source=(job["source"] if job["source"] in {"ctp", "simulate"} else "ctp:" + job["source"]),
                 mid_tolerance_ticks=self.config.classifier.mid_tolerance_ticks,
                 lookbacks=tuple(self.config.analysis.lookbacks),
                 horizons=tuple(self.config.analysis.horizons))

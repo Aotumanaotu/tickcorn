@@ -17,4 +17,5 @@ if [[ "${1:-}" == --check ]]; then
   exit 0
 fi
 docker compose up -d --build --wait --wait-timeout 180
-echo 'Deployed. Configure .env (admin bootstrap), then use the SSH tunnel steps in docs/deployment.md and log in at http://127.0.0.1:8800.'
+DEPLOY_DOMAIN="$(docker compose exec -T caddy printenv DOMAIN)"
+echo "部署完成。请访问 https://www.${DEPLOY_DOMAIN} 并使用管理员账号登录；首次启动需等待证书签发。"

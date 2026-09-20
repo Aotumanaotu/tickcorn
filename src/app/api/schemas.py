@@ -52,6 +52,7 @@ class UserCreate(BaseModel):
 class GatewayConnectRequest(BaseModel):
     """CTP gateway login control payload (validated again gateway-side)."""
 
+    source_kind: str = "unspecified"
     fronts: list[str] = Field(min_length=1)
     broker_id: str = Field(min_length=1)
     user: str = Field(min_length=1)

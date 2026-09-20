@@ -77,7 +77,7 @@ export interface Watchlist {
 
 export interface GatewayStatus {
   state: string
-  instruments?: string[]
+  instruments?: Record<string, string>
   batch_id?: string | null
   events_published?: number
   simulate?: boolean
@@ -86,7 +86,7 @@ export interface GatewayStatus {
 
 export interface IngestStatus {
   events_received: number
-  last_event_at: string | null
+  last_event_at: number | null
 }
 
 export interface SystemStatus {
@@ -94,11 +94,12 @@ export interface SystemStatus {
   gateway_connected: boolean
   ingest: IngestStatus
   db: { ok: boolean }
-  realtime: Record<string, unknown>
+  realtime: Record<string, RealtimeMetrics>
   version: string
 }
 
 export interface GatewayConnectPayload {
+  source_kind: string
   fronts: string[]
   broker_id: string
   user: string
@@ -158,4 +159,28 @@ export interface QuoteData {
 export interface WsTicket {
   ticket: string
   expires_in: number
+}
+
+export interface RealtimeMetrics {
+  bounce_ratio: number | null
+  genuine_move_ratio: number | null
+  one_tick_last_changes: number
+  message_rate_per_min: number
+  mean_spread_ticks: number | null
+  msg_count: number
+  last_event_ns: number | null
+}
+export interface ArchivePartition { instrument: string; day: string; staging: boolean }
+export interface ReportJob {
+  id: string; instrument: string; day: string; source: string
+  status: string; created_at: string; snapshots?: number; error?: string
+}
+export interface MonitorSettings {
+  enabled: boolean; feishu_app_id: string; feishu_app_secret: string
+  feishu_receive_id: string; feishu_receive_id_type: string
+  report_times: string[]; alert_only: boolean; title: string; tz: string
+  has_secret?: boolean; test_request?: number
+}
+export interface MonitorWorker {
+  heartbeat_at?: number; last_sent_at?: number; last_result?: string; test_request?: number
 }

@@ -11,53 +11,54 @@ export const FEATURES = {
 } as const
 
 const routes: RouteRecordRaw[] = [
+  { path: '/monitor', name: 'monitor', component: () => import('@/views/MonitorView.vue'), meta: { title: '飞书推送' } },
   {
     path: '/login',
     name: 'login',
     component: () => import('@/views/LoginView.vue'),
-    meta: { title: 'Sign in', public: true },
+    meta: { title: '登录', public: true },
   },
   {
     path: '/overview',
     name: 'overview',
     component: () => import('@/views/OverviewView.vue'),
-    meta: { title: 'Overview' },
+    meta: { title: '总览' },
   },
   {
     path: '/markets',
     name: 'markets',
     component: () => import('@/views/MarketsView.vue'),
-    meta: { title: 'Markets' },
+    meta: { title: '行情市场' },
   },
   {
     path: '/workspace/:instrumentId',
     name: 'workspace',
     component: () => import('@/views/WorkspaceView.vue'),
-    meta: { title: 'Workspace' },
+    meta: { title: '合约工作台' },
   },
   {
     path: '/microstructure',
     name: 'microstructure',
     component: () => import('@/views/MicrostructureView.vue'),
-    meta: { title: 'Microstructure' },
+    meta: { title: '微观结构' },
   },
   {
     path: '/research',
     name: 'research',
     component: () => import('@/views/ResearchView.vue'),
-    meta: { title: 'Research' },
+    meta: { title: '数据与报告' },
   },
   {
     path: '/system',
     name: 'system',
     component: () => import('@/views/SystemView.vue'),
-    meta: { title: 'System' },
+    meta: { title: '采集与设置' },
   },
   {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('@/views/NotFoundView.vue'),
-    meta: { title: 'Not found' },
+    meta: { title: '页面不存在' },
   },
 ]
 

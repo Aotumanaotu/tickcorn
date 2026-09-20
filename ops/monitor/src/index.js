@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { loadEffectiveConfig, loadConfig } from "./config.js";
 import {
   checkDisk,
@@ -20,13 +22,13 @@ const log = {
 async function runChecks(cfg, now = new Date()) {
   const token = readDashboardToken(cfg.dashboardTokenFile, cfg.dashboardToken);
   const [health, disk] = await Promise.all([
-    checkHealth(cfg.dashboardUrl, cfg.httpTimeoutMs),
+    checkHealth(cfg.dashboardUrl, cfg.httpTimeoutMs, cfg.apiMode),
     checkDisk(cfg.dataDir, cfg.diskWarnPercent),
   ]);
 
   let state = null;
   if (token.token) {
-    state = await checkState(cfg.dashboardUrl, token.token, cfg.httpTimeoutMs);
+    state = await checkState(cfg.dashboardUrl, token.token, cfg.httpTimeoutMs, cfg.apiMode);
   } else {
     state = { ok: false, status: 0, error: token.error || "缺少面板令牌" };
   }
@@ -95,13 +97,24 @@ function printHelp() {
 }
 
 function startScheduler(env) {
+  const statusFile = path.join(loadConfig(env).dataDir, "monitor-status.local.json");
+  let status = {};
+  try { status = JSON.parse(fs.readFileSync(statusFile, "utf8")); } catch {}
+  function saveStatus(patch = {}) {
+    status = { ...status, ...patch, heartbeat_at: Date.now() };
+    fs.writeFileSync(statusFile + ".tmp", JSON.stringify(status), { mode: 0o600 });
+    fs.renameSync(statusFile + ".tmp", statusFile);
+  }
+  let busy = false;
+
   const fired = new Set();
   const intervalMs = 20_000;
-  let lastTestRequest = -1;
+  let lastTestRequest = Number(status.test_request || 0);
   let cfg = loadEffectiveConfig(env);
-  if (lastTestRequest < 0) lastTestRequest = cfg.testRequest;
+  saveStatus();
 
-  const tick = async () => {
+  const runTick = async () => {
+    saveStatus();
     cfg = loadEffectiveConfig(env);           // reload so panel edits apply
     const now = new Date();
     const { hhmm, date } = zonedParts(cfg.tz, now);
@@ -114,9 +127,11 @@ function startScheduler(env) {
       try {
         const { report } = await runAndReport(cfg, now);
         report.text = `[测试消息]\n${report.text}`;
-        await deliver(cfg, report);
+        await deliver({ ...cfg, alertOnly: false }, report);
+        saveStatus({ last_sent_at: Date.now(), last_result: "测试消息已发送", test_request: cfg.testRequest });
       } catch (err) {
-        log.error(`测试简报失败: ${err?.message || err}`);
+        saveStatus({ last_result: "测试发送失败，请检查应用权限、接收方和凭据", test_request: cfg.testRequest });
+        log.error("测试简报发送失败，请检查飞书应用配置");
       }
       return;
     }
@@ -126,17 +141,25 @@ function startScheduler(env) {
     const key = `${date} ${hhmm}`;
     if (fired.has(key)) return;
     fired.add(key);
+    for (const old of fired) if (!old.startsWith(date)) fired.delete(old);
     try {
       const { report } = await runAndReport(cfg, now);
       log.info(`定时触发 ${hhmm}: ${report.severity}`);
-      await deliver(cfg, report);
+      const result = await deliver(cfg, report);
+      saveStatus({ ...(result.sent ? { last_sent_at: Date.now() } : {}), last_result: result.sent ? "定时简报已发送" : "状态正常，已跳过发送" });
     } catch (err) {
-      log.error(`定时简报失败: ${err?.message || err}`);
+      saveStatus({ last_result: "定时发送失败，请检查飞书配置" });
+      log.error("定时简报发送失败");
     }
   };
 
   log.info(`调度已启动，发送时间: ${cfg.reportTimes.join(", ")} (${cfg.tz})`);
   if (!cfg.enabled) log.info("当前未启用（enabled=false），仅响应测试请求");
+  const tick = async () => {
+    if (busy) return;
+    busy = true;
+    try { await runTick(); } catch { log.error("监控检查失败"); } finally { busy = false; }
+  };
   const timer = setInterval(tick, intervalMs);
   return { timer, tick };
 }
