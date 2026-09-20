@@ -17,3 +17,7 @@
 		output stdout
 	}
 }
+
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
