@@ -148,14 +148,37 @@ docker run --rm -v bid-ask_bounce_microterm-data:/data -v $PWD:/backup alpine \
 
 Timescale 热层可随时从 Parquet 归档重建；Parquet 是原始真相，优先备份。
 
-### 升级
+### 更新 / 重新运行
+
+拉取代码后，按「改了什么」选择命令：
 
 ```bash
+cd ~/tickcorn
 git pull
-bash scripts/deploy.sh          # 重新构建并滚动重启
+
+# A) 只改了 compose / Caddyfile / .env（未改 Python 或前端代码）：
+docker compose up -d               # 只重建配置变化的服务，不动其他
+
+# B) 改了 Python / 前端代码（镜像内已打包源码，必须重建）：
+bash scripts/deploy.sh             # = docker compose up -d --build --wait
 ```
 
-数据库 schema 由 `init_database` 幂等维护（create_all + 种子），无需手工迁移。
+验证：
+
+```bash
+sleep 15 && docker compose ps                    # 四服务 Up/healthy
+docker compose logs caddy --tail 30              # 证书签发状态
+```
+
+注意：
+
+- 重建 `gateway` 会短暂中断行情连接（宽限期 120s 会把 Parquet 归档落盘）；
+  若 SimNow 凭据未勾选 remember，需回 **System** 页重新 Connect。
+- 数据库 schema 由 `init_database` 幂等维护（create_all + 种子），无需手工迁移；
+  数据库密码等 `.env` 变更只对 api 生效，改动后 `docker compose up -d` 会重建 api。
+- 修改 **数据库密码** 时，旧的 `microterm-pg` 卷仍保留旧密码，需删卷重建：
+  `docker compose down && docker volume rm tickcorn_microterm-pg && docker compose up -d`
+  （会清空业务/时序库，Parquet 归档卷不受影响）。
 
 ### 故障定位
 
