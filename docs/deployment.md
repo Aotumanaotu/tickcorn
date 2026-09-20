@@ -4,6 +4,55 @@
 服务器安全组仅放行 SSH；8800 只绑定 `127.0.0.1`；密码 Argon2 哈希；
 Refresh Cookie HttpOnly + SameSite=strict。
 
+## 从旧版（corn-tick 面板）升级
+
+```bash
+cd Bid-Ask_Bounce
+
+# 1. 先停旧栈（此时旧 compose 文件还在；120s 宽限等采集归档）。不要加 -v！
+docker compose down
+
+# 2. 拉取新架构
+git pull
+
+# 3. 确认 CTP SDK 仍在（gitignored，pull 不会动它）
+ls third_party/ctp/v6.7.13_linux64/lib/thostmduserapi_se.so
+
+# 4. 配置环境（必改 ADMIN_PASSWORD 与数据库密码）
+cp .env.example .env && vim .env
+
+# 5. 构建并启动新栈（db + api + gateway；首次构建需几分钟）
+bash scripts/deploy.sh
+
+# 6. 验证
+docker compose ps                                        # 三服务 healthy
+curl -s http://127.0.0.1:8800/api/v1/health
+```
+
+说明：
+
+- **若第 1 步前已经 pull 过**：旧 compose 已被替换，用
+  `docker compose down --remove-orphans` 移除残留的 corn-tick 容器，
+  否则其占用 127.0.0.1:8800 会导致新 api 端口冲突。
+- **旧数据卷保留**：旧 `corn-data` 卷不会被删除（`down` 不带 `-v`）。
+  可选迁移历史采集数据到新数据卷（Parquet 分区结构两版一致，自然合并）：
+
+  ```bash
+  docker volume ls | grep bid-ask_bounce        # 确认卷名（前缀为目录名小写）
+  docker run --rm \
+    -v bid-ask_bounce_corn-data:/from \
+    -v bid-ask_bounce_microterm-data:/to \
+    alpine sh -c 'cp -a /from/raw /to/ 2>/dev/null; \
+                   cp -a /from/metadata.db /to/ 2>/dev/null; true'
+  # 不要复制 *.local.json（旧面板令牌/凭据文件）
+  ```
+
+- **登录方式变化**：旧版面板令牌（dashboard-token）已废弃，改用账号登录
+  （`.env` 中 ADMIN_USERNAME/ADMIN_PASSWORD 引导的首个管理员）。
+- **旧飞书 monitor**：尚未迁移到新 API（计划 F1.5），暂不随 compose 启动。
+- **回滚**：`docker compose down --remove-orphans && git checkout e6e90d1
+  && docker compose up -d --build`（旧数据卷未动，可完整恢复旧面板）。
+
 ## 0. 前置条件
 
 - Linux x86_64（CTP SDK 架构限制）、Docker Engine + Compose 插件
