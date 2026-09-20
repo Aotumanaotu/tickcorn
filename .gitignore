@@ -36,6 +36,10 @@ docker-compose.override.yml
 deploy/*.local.*
 *.pem
 *.key
+*.crt
+*.pfx
+*.p12
+*.jks
 *.local.json
 
 # Generated demo reports are runtime artifacts, not source.
