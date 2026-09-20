@@ -34,7 +34,9 @@ app = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# ROS environments expose these unrelated plugins through PYTHONPATH.
+# Block them before auto-discovery imports their optional ROS dependencies.
+addopts = "-q -p no:launch_testing -p no:launch_ros"
 
 [tool.ruff]
 line-length = 100

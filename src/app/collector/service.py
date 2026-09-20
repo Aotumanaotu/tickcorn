@@ -229,6 +229,7 @@ class CollectorService:
         self.live.ctp_trading_day = trading_day
         self.live.login_user_masked = ""
         self.live.set_connection("logged_in", f"trading_day={trading_day}")
+        self.live.clear_subscriptions()
         subscriptions = [i.lower() if self.config.exchange_of(i) in ("DCE", "SHFE", "INE")
                          else i for i in self.instruments]
         rc = self._client_ref.subscribe(subscriptions)
@@ -236,10 +237,15 @@ class CollectorService:
 
     def on_rsp_sub_market_data(self, instrument, error_id, error_msg):
         if error_id != 0:
-            logger.error("subscription failed (code=%s)", error_id)
-            self.live.set_connection("subscription_failed", f"CTP 错误码 {error_id}")
+            logger.error("subscription failed for %s (code=%s)", instrument,
+                         error_id)
+            self.live.note_subscription(instrument, False,
+                                        f"失败 code={error_id}")
+            self.live.set_connection(
+                "subscription_failed", f"{instrument} CTP 错误码 {error_id}")
         else:
             logger.info("subscribed: %s", instrument)
+            self.live.note_subscription(instrument, True)
 
     def on_rsp_unsub_market_data(self, instrument, error_id, error_msg):
         logger.info("unsubscribed: %s (code=%s)", instrument, error_id)

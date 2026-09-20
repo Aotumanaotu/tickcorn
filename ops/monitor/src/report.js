@@ -125,8 +125,21 @@ export function buildReport(data, cfg, now = new Date()) {
   } else {
     lines.push("");
     lines.push(
-      "行情: ⚪ 尚未收到快照，请结合前置服务时间、订阅状态和采集错误日志判断",
+      "行情: ⚪ 尚未收到任何快照（非交易时段属正常；交易时段请检查订阅）",
     );
+    const subs = Object.entries(state?.subscriptions || {});
+    if (subs.length) {
+      lines.push(
+        "订阅: " +
+          subs
+            .map(([inst, st]) =>
+              st === "accepted" ? `${inst} ✅已接受` : `${inst} ❌${st}`,
+            )
+            .join("  "),
+      );
+    } else if (state) {
+      lines.push("订阅: ⚪ 尚未收到订阅响应");
+    }
   }
 
   lines.push("");

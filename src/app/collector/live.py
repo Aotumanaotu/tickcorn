@@ -141,6 +141,7 @@ class LiveState:
         self.login_user_masked: Optional[str] = None
         self.ctp_trading_day: Optional[str] = None
         self.api_version: Optional[str] = None
+        self.subscriptions: dict[str, str] = {}
 
     def instrument(self, instrument_id: str) -> InstrumentLiveState:
         with self.lock:
@@ -154,6 +155,16 @@ class LiveState:
             self.connection_status = status
             self.connection_detail = detail
 
+    def clear_subscriptions(self) -> None:
+        with self.lock:
+            self.subscriptions.clear()
+
+    def note_subscription(self, instrument_id: str, accepted: bool,
+                          detail: str = "") -> None:
+        with self.lock:
+            self.subscriptions[instrument_id] = ("accepted" if accepted
+                                                 else (detail or "failed"))
+
     def to_json(self) -> dict:
         with self.lock:
             return {
@@ -165,6 +176,7 @@ class LiveState:
                 "ctp_trading_day": self.ctp_trading_day,
                 "api_version": self.api_version,
                 "login_user": self.login_user_masked,
+                "subscriptions": dict(self.subscriptions),
                 "instruments": {
                     k: v.snapshot() for k, v in self.instruments.items()},
             }

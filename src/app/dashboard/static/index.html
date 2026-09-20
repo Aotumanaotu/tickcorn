@@ -150,6 +150,7 @@
       <button class="ghost" id="btnForget" onclick="forgetCredentials()">清除账号密码</button>
       <button class="ghost" onclick="logout()">退出面板</button>
       <span class="muted" id="mgrStatus"></span>
+      <span class="muted" id="subsStatus"></span>
     </div>
   </div>
 
@@ -616,6 +617,10 @@ function render() {
       (running ? `运行中 · batch ${mgr.batch_id||""} · ${new Date().toLocaleTimeString()}` :
                  (mgr.stopping ? "正在停止并保存数据" : (mgr.error ? "错误: " + mgr.error : "空闲")))
       + (mgr.instruments && mgr.instruments.length ? "" : "");
+  const subs = Object.entries(state.subscriptions || {});
+  $("subsStatus").textContent = subs.length
+      ? "订阅: " + subs.map(([i, s]) => `${i}${s === "accepted" ? "✓" : "✗"}`).join(" ")
+      : "";
 
   const conn = state.connection || {};
   const c = $("conn");

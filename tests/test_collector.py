@@ -129,6 +129,18 @@ def test_live_state_update_and_snapshot():
     assert js["instruments"]["C2701"]["msg_count"] == 2
 
 
+def test_live_state_subscription_tracking():
+    state = LiveState()
+    assert state.to_json()["subscriptions"] == {}
+    state.note_subscription("c2611", True)
+    state.note_subscription("c2701", False, "失败 code=1")
+    subs = state.to_json()["subscriptions"]
+    assert subs == {"c2611": "accepted", "c2701": "失败 code=1"}
+    # reconnect clears stale subscription state
+    state.clear_subscriptions()
+    assert state.to_json()["subscriptions"] == {}
+
+
 def test_jsonl_tail_source(tmp_path: Path):
     live_dir = tmp_path / "live"
     live_dir.mkdir()

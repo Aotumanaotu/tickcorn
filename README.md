@@ -59,11 +59,13 @@ python3.10 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 bash scripts/build_ctp_shim.sh
 env -u PYTHONPATH .venv/bin/python -m app selftest
-env -u PYTHONPATH .venv/bin/python -m pytest
+.venv/bin/python -m pytest
 env -u PYTHONPATH .venv/bin/python -m app serve
 ```
 
 无 SDK 时可以运行纯 Python 分析测试；需要原生 CTP 的用例会跳过。容器构建会实际编译 SDK 包装层并验证结构体布局。依赖清单锁定 Python 3.10 / Linux amd64 的版本和安装包哈希；基础镜像及系统安全更新仍需定期维护。自动检查见 `.github/workflows/checks.yml`。
+
+pytest 配置已禁用与本项目无关的 ROS `launch_testing`、`launch_ros` 插件，避免 ROS 环境中的 `PYTHONPATH` 触发缺少 `lark` 等依赖的启动错误。HTTP 集成测试需要允许监听本机回环端口。
 
 ## 数据来源与使用边界
 
