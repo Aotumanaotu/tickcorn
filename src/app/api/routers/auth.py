@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, \
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_settings
+from app.api.ratelimit import client_ip, throttle
 from app.api.schemas import LoginRequest, TokenResponse, UserOut
 from app.auth.jwt import InvalidTokenError, create_access_token
 from app.auth.rbac import permissions_of
@@ -63,18 +64,23 @@ def _clear_refresh_cookie(response: Response) -> None:
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
     settings: WebSettings = Depends(get_settings),
 ) -> TokenResponse:
     """Exchange credentials for an access token + refresh cookie."""
+    ip = client_ip(request)
+    throttle.check(ip)
     user = await authenticate(db, body.username, body.password)
     if user is None:
+        throttle.record_failure(ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    throttle.reset(ip)
     access = create_access_token(
         user.id, user.username, user.role,
         secret=settings.jwt_secret, ttl_s=settings.access_token_ttl_s)

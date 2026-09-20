@@ -27,14 +27,20 @@ services:
     image: microterm-app
     platform: linux/amd64
     command: ["python", "-m", "app", "api", "--host", "0.0.0.0", "--port", "8000"]
-    ports:
-      - "127.0.0.1:8800:8000"
+    # Public access goes through the caddy reverse proxy (HTTPS, ports
+    # 80/443). Direct binding removed: Secure refresh cookies require TLS.
+    # For SSH-tunnel access re-add  `ports: ["127.0.0.1:8800:8000"]`  and
+    # set APP_ENV=dev (cookies without the Secure flag).
     environment:
       DATABASE_URL: postgresql+asyncpg://microterm:${MICROTERM_DB_PASSWORD:-microterm-dev-password}@db:5432/microterm
       GATEWAY_SOCKET: /app/data/gateway.sock
-      APP_ENV: ${APP_ENV:-dev}
+      APP_ENV: ${APP_ENV:-production}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # trust X-Forwarded-* from the caddy container (api is not published)
+      FORWARDED_ALLOW_IPS: "*"
+    expose:
+      - "8000"
     volumes:
       - microterm-data:/app/data
     depends_on:
@@ -49,6 +55,39 @@ services:
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Public HTTPS entry: automatic Let's Encrypt for DOMAIN, proxies to api.
+  # Security group must allow inbound 80 + 443; DNS A record -> server IP.
+  caddy:
+    image: caddy:2-alpine
+    platform: linux/amd64
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     logging:
       driver: json-file
@@ -130,3 +169,5 @@ services:
 volumes:
   microterm-data:
   microterm-pg:
+  caddy-data:
+  caddy-config:

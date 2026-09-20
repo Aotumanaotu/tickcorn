@@ -79,45 +79,43 @@ cd frontend && npm install && npm run dev    # http://localhost:5173，代理到
 > 未设 `DATABASE_URL` 时自动使用 `data/app.db`（SQLite）。模拟源标签为
 > `simulate`，数据仅用于链路开发验证，不构成市场样本。
 
-## Docker 部署（推荐，含 TimescaleDB）
+## Docker 部署（推荐，域名直连 HTTPS）
 
-依赖 Linux x86_64、Docker Engine 与 Compose 插件。默认方案为 SSH 隧道访问，
-不对外暴露端口。
+依赖 Linux x86_64、Docker Engine 与 Compose 插件。默认方案：**caddy 容器做
+公网 HTTPS 入口**（自动申请/续期 Let's Encrypt 证书），浏览器直接访问
+`https://<域名>`，账号密码登录。
 
-1. **准备 SDK**：从 [SimNow 官方 API 下载页](https://www.simnow.com.cn/static/apiDownload.action)
+1. **准备**：域名 A 记录指向服务器 IP；阿里云安全组放行 **80/443**（保留 22）；
+   从 [SimNow 官方 API 下载页](https://www.simnow.com.cn/static/apiDownload.action)
    获取有权使用的 CTP **v6.7.13 Linux x86_64 MdApi** SDK，按 `third_party/README.md`
-   放入本地目录（SDK 不随源码分发）。无 SDK 也能部署：用 simulate profile（见下）。
+   放入本地目录（SDK 不随源码分发；无 SDK 可用 simulate profile 演示）。
 
 2. **配置环境**：
 
    ```bash
-   cp .env.example .env && vim .env   # 改数据库密码与 admin 初始密码
+   cp .env.example .env && vim .env   # DOMAIN / ACME_EMAIL / 数据库与 admin 密码
    ```
 
 3. **构建并启动**：
 
    ```bash
-   bash scripts/deploy.sh             # 构建镜像 + 起 db/api/gateway
+   bash scripts/deploy.sh             # db + api + gateway + caddy
    # 或无 SDK 演示模式：
    docker compose --profile simulate up -d --build --wait
    ```
 
-4. **建立隧道并访问**（服务器不开放 8800 公网端口）：
-
-   ```bash
-   ssh -N -L 8800:127.0.0.1:8800 <SSH_USER>@<SERVER_HOST>
-   ```
-
-   打开 `http://127.0.0.1:8800`，用 `.env` 中的 admin 账号登录。
+4. **访问**：浏览器打开 `https://<域名>`（首次签发证书约 1 分钟），用 `.env`
+   中的 admin 账号登录。公网安全：登录按 IP 限流（5 次失败/5 分钟）、
+   Argon2 密码哈希、HttpOnly+Secure Cookie、HSTS/CSP 安全头。
 
 5. **接入 SimNow 行情**：登录终端 → **System** 页 → 填写行情前置 / BrokerID /
    SimNow 账号 / 订阅合约（如 `C2611`）→ Connect。凭据默认只存网关进程内存；
    勾选 "remember" 才写入数据卷 0600 文件（明文，主机管理员可读）。
 
-服务组成：`db`（timescale/timescaledb:pg16，数据卷 `microterm-pg`）、`api`
-（FastAPI + 前端静态，`127.0.0.1:8800`）、`gateway`（CTP 行程进程，与 api 共享
-`microterm-data` 卷：socket + Parquet）。`gateway-simulate` 为 simulate profile
-的开发演示服务，与 `gateway` 二选一。
+服务组成：`db`（timescale/timescaledb:pg16，卷 `microterm-pg`）、`api`
+（FastAPI + 前端静态，仅容器网络内可达）、`gateway`（CTP 行程进程，与 api
+共享 `microterm-data` 卷：socket + Parquet）、`caddy`（80/443 公网入口，
+卷 `caddy-data` 存证书）。无域名的 SSH 隧道备选方案见部署指南。
 
 升级 / 备份 / 故障排查见 [部署指南](docs/deployment.md)。
 
