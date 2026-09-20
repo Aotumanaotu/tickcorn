@@ -58,8 +58,13 @@ def test_staging_write_and_finalize(store):
     # immutable: read-only permission bits
     mode = stat.S_IMODE(os.stat(final).st_mode)
     assert mode == 0o444
-    # reading still works
-    assert pq.read_table(final).num_rows == 20
+    # Read the file directly: Hive inference from trading_day=... can conflict
+    # with the string column stored in RAW_SCHEMA (e.g. with PyArrow 20).
+    finalized = pq.ParquetFile(final).read()
+    assert finalized.num_rows == 20
+    assert finalized.schema == RAW_SCHEMA
+    assert finalized.equals(t)
+    assert store.read_partition(key).equals(t)
     # sha recorded
     assert result.sha256 == sha256_of_file(final)
 
