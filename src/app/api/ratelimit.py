@@ -67,10 +67,20 @@ class LoginThrottle:
         self._failures.pop(ip, None)
 
 
-throttle = LoginThrottle(
-    max_failures=_env_int("LOGIN_RATE_LIMIT", 5),
-    window_s=_env_int("LOGIN_RATE_WINDOW_S", 300),
-)
+def get_throttle(request: Request) -> LoginThrottle:
+    """Throttle instance bound to one app instance (app.state).
+
+    Keeps independently created apps isolated -- notably test clients,
+    which would otherwise inherit failure counters from each other.
+    """
+    instance = getattr(request.app.state, "login_throttle", None)
+    if instance is None:
+        instance = LoginThrottle(
+            max_failures=_env_int("LOGIN_RATE_LIMIT", 5),
+            window_s=_env_int("LOGIN_RATE_WINDOW_S", 300),
+        )
+        request.app.state.login_throttle = instance
+    return instance
 
 
 def client_ip(request: Request) -> str:

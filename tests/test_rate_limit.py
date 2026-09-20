@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.api.main import create_app
-from app.api.ratelimit import LoginThrottle, throttle
+from app.api.ratelimit import LoginThrottle
 from app.auth.service import create_user
 from app.common.runtime import WebSettings
 
@@ -32,7 +32,6 @@ async def api_app(config, tmp_path):
         gateway_socket=tmp_path / "g.sock",
     )
     application = create_app(config=config, settings=settings)
-    throttle._failures.clear()
     async with application.router.lifespan_context(application):
         async with application.state.session_factory() as session:
             await create_user(session, "admin", "admin-pw-123", "ADMIN")

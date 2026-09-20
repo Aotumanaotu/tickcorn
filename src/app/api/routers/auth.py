@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, \
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_settings
-from app.api.ratelimit import client_ip, throttle
+from app.api.ratelimit import client_ip, get_throttle
 from app.api.schemas import LoginRequest, TokenResponse, UserOut
 from app.auth.jwt import InvalidTokenError, create_access_token
 from app.auth.rbac import permissions_of
@@ -71,6 +71,7 @@ async def login(
 ) -> TokenResponse:
     """Exchange credentials for an access token + refresh cookie."""
     ip = client_ip(request)
+    throttle = get_throttle(request)
     throttle.check(ip)
     user = await authenticate(db, body.username, body.password)
     if user is None:
