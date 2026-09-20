@@ -1,4 +1,14 @@
 # The CTP MdApi SDK must be supplied locally under its own license.
+
+# ---------- stage 1: frontend ----------
+FROM node:22-alpine AS frontend
+WORKDIR /web
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend ./
+RUN npm run build
+
+# ---------- stage 2: python build ----------
 FROM python:3.10-slim-bookworm AS build
 RUN test "$(uname -m)" = x86_64 || (echo "CTP SDK requires Linux x86_64" >&2; exit 1)
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
@@ -16,6 +26,7 @@ COPY third_party/ctp/v6.7.13_linux64 ./third_party/ctp/v6.7.13_linux64
 RUN bash scripts/build_ctp_shim.sh \
     && /opt/venv/bin/pip install --no-cache-dir --no-deps --no-build-isolation -e .
 
+# ---------- stage 3: runtime (api + gateway share this image) ----------
 FROM python:3.10-slim-bookworm
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends libstdc++6 fonts-noto-cjk \
@@ -28,11 +39,12 @@ COPY --from=build /opt/venv /opt/venv
 COPY --from=build /app/src /app/src
 COPY --from=build /app/config /app/config
 COPY --from=build /app/pyproject.toml /app/README.md ./
+COPY --from=frontend /web/dist /app/frontend/dist
 RUN mkdir -p /app/data && chown app:app /app/data && chmod 700 /app/data
 USER app
 RUN python -m app selftest
 VOLUME ["/app/data"]
-EXPOSE 8800
+EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8800/healthz', timeout=3).read()"
-CMD ["python", "-m", "app", "serve", "--host", "0.0.0.0", "--port", "8800"]
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3).read()"
+CMD ["python", "-m", "app", "api", "--host", "0.0.0.0", "--port", "8000"]

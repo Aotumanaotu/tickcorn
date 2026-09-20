@@ -1,0 +1,67 @@
+/* Motion spec: restrained. Route fade 150ms, card hover tint, LIVE breathing dot. */
+
+/* ---------- route / view transitions ---------- */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--dur-fast) ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* ---------- toast ---------- */
+.toast-enter-active,
+.toast-leave-active {
+  transition: all var(--dur-fast) ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+/* ---------- dropdown ---------- */
+.pop-enter-active,
+.pop-leave-active {
+  transition:
+    opacity var(--dur-fast) ease,
+    transform var(--dur-fast) ease;
+}
+
+.pop-enter-from,
+.pop-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* ---------- LIVE breathing dot ---------- */
+@keyframes live-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--up);
+  animation: live-breathe var(--dur-breathe) ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

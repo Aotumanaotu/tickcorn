@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.classifier.jump_classifier import JumpEventClassifier
+from app.core.classifier.jump_classifier import JumpEventClassifier
 from app.common.constants import EventLabel
 
 

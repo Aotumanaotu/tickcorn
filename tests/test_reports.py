@@ -14,10 +14,11 @@ import pytest
 from app.common.config import load_config
 from app.common.exceptions import AppError
 from app.common.schema import RAW_SCHEMA, PartitionKey
-from app.dashboard.control import CollectorManager, SettingsStore
-from app.dashboard.environments import PRESETS
-from app.dashboard.reports import ReportStore, briefing
+from app.legacy.dashboard.control import CollectorManager, SettingsStore
+from app.legacy.dashboard.environments import PRESETS
+from app.legacy.dashboard.reports import ReportStore, briefing
 from app.storage.parquet_store import RawParquetStore
+from app.analysis.pipeline import load_clean
 from app.storage.repo import StorageRepository
 from conftest import ROOT, build_synthetic_day
 from test_control import _req, _serve
@@ -61,13 +62,13 @@ def test_source_filter_before_cleaning_and_cache(report_env):
     config, _, _ = report_env
     repo = StorageRepository(config)
     for source in ("ctp:simnow_test", "ctp:simnow_standard"):
-        result = repo.load_clean("C2701", "2026-09-18", raw_source=source)
+        result = load_clean(repo, "C2701", "2026-09-18", raw_source=source)
         assert len(result.df) == 102
         assert result.stats["input_rows"] == 102
         assert set(result.df.raw_source) == {source}
-        again = repo.load_clean("C2701", "2026-09-18", raw_source=source)
+        again = load_clean(repo, "C2701", "2026-09-18", raw_source=source)
         pd.testing.assert_frame_equal(result.df, again.df)
-    empty = repo.load_clean("C2701", "2026-09-18", raw_source="absent")
+    empty = load_clean(repo, "C2701", "2026-09-18", raw_source="absent")
     assert empty.df.empty
 
 
@@ -137,7 +138,7 @@ def test_report_busy_failure_retry_and_interrupted(report_env, monkeypatch):
         release.wait(10)
         raise RuntimeError("private failure must not be exported")
 
-    monkeypatch.setattr("app.report.generator.run_analysis", fail)
+    monkeypatch.setattr("app.analysis.session_report.run_analysis", fail)
     payload = {"instrument": "C2701", "day": "2026-09-18", "source": "simnow_test"}
     job = manager.create_report(payload)
     assert entered.wait(5)

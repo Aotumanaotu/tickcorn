@@ -102,6 +102,51 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--no-token", action="store_true",
                    help="allow no-token access (NOT recommended off-localhost)")
 
+    # ---------------- api (FastAPI research terminal) ----------------
+    c = sub.add_parser("api", help="run the FastAPI research terminal backend")
+    c.add_argument("--host", default=None,
+                   help="bind address (default API_HOST or 127.0.0.1)")
+    c.add_argument("--port", type=int, default=None,
+                   help="port (default API_PORT or 8000)")
+    c.add_argument("--reload", action="store_true",
+                   help="enable autoreload (development only)")
+
+    # ---------------- gateway (CTP market data process) ----------------
+    c = sub.add_parser("gateway", help="run the CTP market gateway process "
+                                       "(or python -m app.gateway)")
+    c.add_argument("--simulate", action="store_true",
+                   help="synthetic feed instead of CTP (no SDK needed)")
+    c.add_argument("--instrument", "-i", action="append", default=None,
+                   help="instrument id for simulate mode (repeatable)")
+    c.add_argument("--simulate-rate", type=float, default=2.0,
+                   help="simulate feed rate in hz (default 2.0)")
+    c.add_argument("--simulate-seed", type=int, default=7)
+
+    # ---------------- init-db ----------------
+    c = sub.add_parser("init-db", help="create database tables and seed "
+                                       "products/instruments")
+    c.add_argument("--admin-user", default=None,
+                   help="create this ADMIN user if missing")
+    c.add_argument("--admin-password", default=None,
+                   help="ADMIN password (or env ADMIN_PASSWORD)")
+
+    # ---------------- admin ----------------
+    c = sub.add_parser("admin", help="user administration")
+    a = c.add_subparsers(dest="admin_cmd", required=True)
+    ac = a.add_parser("create", help="create a user")
+    ac.add_argument("--username", required=True)
+    ac.add_argument("--password", required=True)
+    ac.add_argument("--role", default="RESEARCHER",
+                    choices=["ADMIN", "RESEARCHER", "TRADER", "VIEWER"])
+    ac = a.add_parser("set-password", help="change a user's password")
+    ac.add_argument("--username", required=True)
+    ac.add_argument("--password", required=True)
+    ac = a.add_parser("set-role", help="change a user's role")
+    ac.add_argument("--username", required=True)
+    ac.add_argument("--role", required=True,
+                    choices=["ADMIN", "RESEARCHER", "TRADER", "VIEWER"])
+    ac = a.add_parser("list", help="list users")
+
     # ---------------- info ----------------
     c = sub.add_parser("info", help="list instruments / days / batches / runs")
     c.add_argument("--instrument", default=None)
@@ -159,7 +204,7 @@ def cmd_collect(args) -> int:
             print("no credentials given; aborting", file=sys.stderr)
             return 2
 
-    from app.collector.service import CollectorService
+    from app.legacy.collector.service import CollectorService
     svc = CollectorService(
         config=config,
         instruments=args.instrument,
@@ -204,9 +249,9 @@ def _cmd_finalize(args) -> int:
 
 
 def cmd_replay(args) -> int:
-    from app.collector.live import LiveState
-    from app.dashboard.server import DashboardServer
-    from app.replay.replayer import Replayer
+    from app.legacy.collector.live import LiveState
+    from app.legacy.dashboard.server import DashboardServer
+    from app.analysis.replay import Replayer
     from app.storage.repo import StorageRepository
     config = _load_config(args)
     repo = StorageRepository(config)
@@ -267,7 +312,7 @@ def cmd_replay(args) -> int:
         print(f"dashboard: http://{config.dashboard.host}:{port}")
 
     # classify before replay so the dashboard shows event markers
-    from app.classifier.jump_classifier import JumpEventClassifier
+    from app.core.classifier.jump_classifier import JumpEventClassifier
     clf = JumpEventClassifier(
         tick_size=config.resolve_tick_size(args.instrument))
     df = pd_concat_labels(df, clf)
@@ -296,7 +341,7 @@ def pd_concat_labels(df, clf):
 
 
 def cmd_analyze(args) -> int:
-    from app.report.generator import AnalysisOptions, run_analysis
+    from app.analysis.session_report import AnalysisOptions, run_analysis
     from app.storage.repo import StorageRepository
     config = _load_config(args)
     repo = StorageRepository(config)
@@ -323,8 +368,8 @@ def cmd_analyze(args) -> int:
 
 
 def cmd_dashboard(args) -> int:
-    from app.collector.live import JsonlTailSource, LiveState
-    from app.dashboard.server import DashboardServer
+    from app.legacy.collector.live import JsonlTailSource, LiveState
+    from app.legacy.dashboard.server import DashboardServer
     config = _load_config(args)
     state = LiveState(history_points=config.dashboard.history_points)
     state.set_connection("standalone", "tailing live feed file")
@@ -342,9 +387,9 @@ def cmd_dashboard(args) -> int:
 
 
 def cmd_serve(args) -> int:
-    from app.collector.live import LiveState
-    from app.dashboard.control import CollectorManager
-    from app.dashboard.server import DashboardServer
+    from app.legacy.collector.live import LiveState
+    from app.legacy.dashboard.control import CollectorManager
+    from app.legacy.dashboard.server import DashboardServer
     config = _load_config(args)
     manager = CollectorManager(config)
 
@@ -384,6 +429,109 @@ def cmd_serve(args) -> int:
                 signal.signal(sig, handler)
             lock.close()
     return 0
+
+
+def cmd_api(args) -> int:
+    import uvicorn
+    from app.common.runtime import load_web_settings
+    config = _load_config(args)
+    settings = load_web_settings(config)
+    host = args.host or settings.api_host
+    port = args.port or settings.api_port
+    if host not in ("127.0.0.1", "localhost", "::1") and not settings.is_production:
+        logger.warning("binding non-loopback in dev mode; set APP_ENV=production "
+                       "to enable Secure cookies")
+    print(f"API: http://{host}:{port}/  (docs at /api/docs)", flush=True)
+    uvicorn.run("app.api.main:app", host=host, port=port,
+                reload=args.reload, log_level=args.log_level.lower())
+    return 0
+
+
+def cmd_gateway(args) -> int:
+    import asyncio
+    from app.common.runtime import load_web_settings
+    from app.gateway.process import run_gateway
+    config = _load_config(args)
+    settings = load_web_settings(config)
+    return asyncio.run(run_gateway(
+        config, settings, simulate=args.simulate,
+        simulate_instruments=args.instrument,
+        simulate_rate_hz=args.simulate_rate,
+        simulate_seed=args.simulate_seed))
+
+
+def cmd_init_db(args) -> int:
+    import asyncio
+    from app.common.runtime import load_web_settings
+    from app.storage.db import create_async_engine_from_url
+    from app.storage.timescale import init_database
+    config = _load_config(args)
+    settings = load_web_settings(config)
+    if args.admin_user and args.admin_password:
+        os.environ.setdefault("ADMIN_USERNAME", args.admin_user)
+        os.environ["ADMIN_PASSWORD"] = args.admin_password
+    elif args.admin_user or args.admin_password:
+        raise AppError("--admin-user and --admin-password must be given together")
+
+    async def _run() -> None:
+        engine = create_async_engine_from_url(settings.database_url)
+        try:
+            await init_database(engine, config)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+    print(f"database initialized: {settings.database_url}", flush=True)
+    return 0
+
+
+def cmd_admin(args) -> int:
+    import asyncio
+    from app.auth import service as auth_service
+    from app.common.runtime import load_web_settings
+    from app.storage.db import create_async_engine_from_url, get_session_factory
+    from app.storage.models import User
+
+    config = _load_config(args)
+    settings = load_web_settings(config)
+
+    async def _run() -> int:
+        engine = create_async_engine_from_url(settings.database_url)
+        factory = get_session_factory(engine)
+        try:
+            async with factory() as session:
+                if args.admin_cmd == "create":
+                    user = await auth_service.create_user(
+                        session, args.username, args.password, args.role)
+                    print(f"created user {user.username} ({user.role})")
+                elif args.admin_cmd == "set-password":
+                    user = await auth_service.get_user_by_username(
+                        session, args.username)
+                    if user is None:
+                        raise AppError(f"user not found: {args.username}")
+                    user.password_hash = auth_service.hash_password(args.password)
+                    await session.commit()
+                    print(f"password updated for {user.username}")
+                elif args.admin_cmd == "set-role":
+                    user = await auth_service.get_user_by_username(
+                        session, args.username)
+                    if user is None:
+                        raise AppError(f"user not found: {args.username}")
+                    user.role = args.role
+                    await session.commit()
+                    print(f"role updated: {user.username} -> {args.role}")
+                elif args.admin_cmd == "list":
+                    from sqlalchemy import select
+                    users = (await session.execute(
+                        select(User).order_by(User.id))).scalars().all()
+                    for u in users:
+                        print(f"  {u.id:4d} {u.username:20s} {u.role:12s} "
+                              f"{'active' if u.is_active else 'disabled'}")
+        finally:
+            await engine.dispose()
+        return 0
+
+    return asyncio.run(_run())
 
 
 def cmd_info(args) -> int:
@@ -440,7 +588,7 @@ def cmd_selftest(args) -> int:
 
     print("[2] CTP shim ... ", end="")
     try:
-        from app.collector.ctp_binding import (SHIM_PATH, CTPDepthMarketData,
+        from app.gateway.native.ctp_binding import (SHIM_PATH, CTPDepthMarketData,
                                                verify_struct_layout)
         lib = ctypes.CDLL(str(SHIM_PATH))
         verify_struct_layout(lib)
@@ -452,7 +600,7 @@ def cmd_selftest(args) -> int:
 
     print("[3] classifier spec cases ... ", end="")
     try:
-        from app.classifier.jump_classifier import JumpEventClassifier
+        from app.core.classifier.jump_classifier import JumpEventClassifier
         clf = JumpEventClassifier(tick_size=1.0)
         r1 = clf.classify_pair(2300, 2301, 2300, 2300, 2301, 2301)
         r2 = clf.classify_pair(2300, 2301, 2300, 2301, 2302, 2301)
@@ -486,6 +634,10 @@ COMMANDS = {
     "analyze": cmd_analyze,
     "dashboard": cmd_dashboard,
     "serve": cmd_serve,
+    "api": cmd_api,
+    "gateway": cmd_gateway,
+    "init-db": cmd_init_db,
+    "admin": cmd_admin,
     "info": cmd_info,
     "verify": cmd_verify,
     "selftest": cmd_selftest,

@@ -15,7 +15,7 @@ dist/
 
 # Proprietary SDK is supplied locally under its own terms; build artifacts are local.
 third_party/ctp/
-src/app/collector/native/*.so
+src/app/gateway/native/*.so
 
 # data (research artifacts, never commit)
 data/

@@ -17,11 +17,11 @@ import pytest
 
 from app.common.config import load_config
 from app.common.private_files import dashboard_token, ProcessLock
-from app.collector.service import CollectorService
-from app.dashboard.control import CollectorManager
-from app.features.derived import add_ts_and_minute
-from app.statistics.event_stats import _count_block
-from app.statistics.transition import next_genuine_direction, obi_conditional_table
+from app.legacy.collector.service import CollectorService
+from app.legacy.dashboard.control import CollectorManager
+from app.core.features.derived import add_ts_and_minute
+from app.core.statistics.event_stats import _count_block
+from app.core.statistics.transition import next_genuine_direction, obi_conditional_table
 from conftest import ROOT, build_synthetic_day
 
 
@@ -111,7 +111,7 @@ def test_writer_flush_rows_and_lowercase_quotes(tmp_path):
 def test_sigterm_stops_web_collector(tmp_path):
     """Exercise the actual container command and CTP shutdown against localhost."""
     import sys
-    from app.collector.ctp_binding import SHIM_PATH
+    from app.gateway.native.ctp_binding import SHIM_PATH
     if not SHIM_PATH.exists():
         pytest.skip("local CTP SDK not supplied")
     with socket.socket() as probe:
@@ -157,7 +157,8 @@ def test_sigterm_stops_web_collector(tmp_path):
 def test_native_callback_to_parquet_and_clean_dates(tmp_path):
     """Exercise the actual evt=9 dispatcher, including real CTP date formats."""
     import ctypes
-    from app.collector.ctp_binding import CTPDepthMarketData, CtpMdClient
+    from app.gateway.native.ctp_binding import CTPDepthMarketData, CtpMdClient
+    from app.analysis.pipeline import load_clean
     from app.storage.repo import StorageRepository
     cfg = load_config(ROOT / "config", tmp_path)
     svc = CollectorService(cfg, ["C2611"], "test-user", "test-password", raw_source="synthetic")
@@ -188,7 +189,7 @@ def test_native_callback_to_parquet_and_clean_dates(tmp_path):
     assert len(keys) == 1 and keys[0].trading_day == "2026-09-18"
     raw = svc.store.read_partition(keys[0]).to_pandas()
     assert raw["action_day"].tolist() == ["20260918", "20260918"]
-    clean = StorageRepository(cfg).load_clean("C2611", "2026-09-18").df
+    clean = load_clean(StorageRepository(cfg), "C2611", "2026-09-18").df
     assert len(clean) == 2
     assert clean["action_day"].tolist() == ["2026-09-18", "2026-09-18"]
     assert clean["minute_of_day"].tolist() == [570, 570]

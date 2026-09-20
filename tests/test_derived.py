@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.features.derived import add_basic_quote_features, add_deltas
-from app.storage.repo import build_clean_dataframe
+from app.core.features.derived import add_basic_quote_features, add_deltas
+from app.analysis.pipeline import build_clean_dataframe
 
 
 def _mini_df():

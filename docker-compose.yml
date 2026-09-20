@@ -1,11 +1,116 @@
 services:
-  corn-tick:
-    build: .
+  db:
+    image: timescale/timescaledb:2.17.2-pg16
     platform: linux/amd64
-    ports:
-      - "127.0.0.1:8800:8800"
+    environment:
+      POSTGRES_USER: microterm
+      POSTGRES_PASSWORD: ${MICROTERM_DB_PASSWORD:-microterm-dev-password}
+      POSTGRES_DB: microterm
     volumes:
-      - corn-data:/app/data
+      - microterm-pg:/var/lib/postgresql/data
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U microterm -d microterm"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    build: .
+    image: microterm-app
+    platform: linux/amd64
+    command: ["python", "-m", "app", "api", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8800:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://microterm:${MICROTERM_DB_PASSWORD:-microterm-dev-password}@db:5432/microterm
+      GATEWAY_SOCKET: /app/data/gateway.sock
+      APP_ENV: ${APP_ENV:-dev}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      - microterm-data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Real CTP/SimNow gateway. Credentials are submitted at runtime from the
+  # web System page (POST /api/v1/system/gateway/connect); they are never
+  # baked into the image.
+  gateway:
+    build: .
+    image: microterm-app
+    platform: linux/amd64
+    command: ["python", "-m", "app", "gateway"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://microterm:${MICROTERM_DB_PASSWORD:-microterm-dev-password}@db:5432/microterm
+      GATEWAY_SOCKET: /app/data/gateway.sock
+    volumes:
+      - microterm-data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # generous grace so the archiver can finalize parquet on stop
+    stop_grace_period: 120s
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /app/data/gateway.sock || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Synthetic feed for development / demos (no CTP SDK account needed):
+  #   docker compose --profile simulate up -d gateway-simulate
+  gateway-simulate:
+    build: .
+    image: microterm-app
+    platform: linux/amd64
+    profiles: ["simulate"]
+    command: ["python", "-m", "app", "gateway", "--simulate", "-i", "C2611", "--simulate-rate", "5"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://microterm:${MICROTERM_DB_PASSWORD:-microterm-dev-password}@db:5432/microterm
+      GATEWAY_SOCKET: /app/data/gateway.sock
+    volumes:
+      - microterm-data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
     init: true
     read_only: true
     tmpfs:
@@ -21,41 +126,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-  # 每日简报 / 健康监控。默认不随 `docker compose up` 启动，需显式启用：
-  #   docker compose --profile monitor up -d monitor
-  # 飞书凭证、发送时间等在网页面板“每日简报”里填写（写入数据卷，
-  # monitor 自动重读，无需重启）；ops/monitor/.env 仅作无面板部署的回退。
-  monitor:
-    build: ./ops/monitor
-    profiles: ["monitor"]
-    depends_on:
-      - corn-tick
-    environment:
-      TZ: Asia/Shanghai
-      DASHBOARD_URL: http://corn-tick:8800
-      DATA_DIR: /data
-      DASHBOARD_TOKEN_FILE: /data/dashboard-token.local.json
-      REPORT_TIMES: "08:00,12:30,21:30"
-    env_file:
-      - path: ./ops/monitor/.env
-        required: false
-    user: "10001:10001"
-    volumes:
-      - corn-data:/data:ro
-    init: true
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
 
 volumes:
-  corn-data:
+  microterm-data:
+  microterm-pg:

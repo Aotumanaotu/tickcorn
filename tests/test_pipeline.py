@@ -38,7 +38,7 @@ def e2e_env(tmp_path: Path):
 
 
 def test_end_to_end_analysis(e2e_env):
-    from app.report.generator import AnalysisOptions, run_analysis
+    from app.analysis.session_report import AnalysisOptions, run_analysis
     config, db, store = e2e_env
 
     result = run_analysis(config, "C2701", ["2026-09-18"],
@@ -96,7 +96,8 @@ def test_end_to_end_analysis(e2e_env):
 
 
 def test_end_to_end_replay(e2e_env):
-    from app.replay.replayer import Replayer
+    from app.analysis.replay import Replayer
+    from app.analysis.pipeline import load_clean
     from app.storage.repo import StorageRepository
     config, db, store = e2e_env
     repo = StorageRepository(config, db=db)
@@ -116,13 +117,14 @@ def test_end_to_end_replay(e2e_env):
 
 
 def test_clean_layer_and_processed_cache(e2e_env):
+    from app.analysis.pipeline import load_clean
     from app.storage.repo import StorageRepository
     config, db, store = e2e_env
     repo = StorageRepository(config, db=db)
-    r1 = repo.load_clean("C2701", "2026-09-18")
+    r1 = load_clean(repo, "C2701", "2026-09-18")
     assert len(r1.df) == 102
     # cache hit returns identical frame
-    r2 = repo.load_clean("C2701", "2026-09-18")
+    r2 = load_clean(repo, "C2701", "2026-09-18")
     assert len(r2.df) == 102
     assert list(r2.df.columns) == list(r1.df.columns)
     # obi/microprice finite for most rows

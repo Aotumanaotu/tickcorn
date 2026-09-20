@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from app.collector.ctp_binding import depth_fields_to_row, depth_struct_to_fields
-from app.collector.live import (JsonlTailSource, LiveClassifier, LiveState,
+from app.gateway.native.ctp_binding import depth_fields_to_row, depth_struct_to_fields
+from app.legacy.collector.live import (JsonlTailSource, LiveClassifier, LiveState,
                                 live_feed_path)
 from conftest import make_row
 
@@ -65,7 +65,7 @@ def test_depth_struct_to_fields_reads_ctypes_struct():
     function; a wrong unpack raised on every tick and silently dropped all data.
     """
     import ctypes
-    from app.collector.ctp_binding import CTPDepthMarketData
+    from app.gateway.native.ctp_binding import CTPDepthMarketData
 
     s = CTPDepthMarketData()
     s.TradingDay = b"20260918"
@@ -181,7 +181,7 @@ def test_jsonl_tail_source(tmp_path: Path):
 
 
 def test_dashboard_http(tmp_path):
-    from app.dashboard.server import DashboardServer
+    from app.legacy.dashboard.server import DashboardServer
     state = LiveState()
     state.set_connection("logged_in", "test")
     inst = state.instrument("C2701")

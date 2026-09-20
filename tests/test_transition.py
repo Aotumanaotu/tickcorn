@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.statistics.transition import (direction_by_state, next_genuine_direction,
+from app.core.statistics.transition import (direction_by_state, next_genuine_direction,
                                        obi_conditional_table, state5_matrix,
                                        state8_matrix)
 

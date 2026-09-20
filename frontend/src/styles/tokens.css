@@ -1,0 +1,59 @@
+/* MICROTERM design tokens — dark & light themes. */
+
+:root {
+  --font-sans:
+    'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono:
+    'JetBrains Mono', 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --sidebar-w: 220px;
+  --topbar-h: 48px;
+
+  --dur-fast: 150ms;
+  --dur-breathe: 2s;
+}
+
+[data-theme='dark'] {
+  --bg: #0b0f17;
+  --panel: #111722;
+  --card: #161d2a;
+  --border: #232c3a;
+  --text: #e7ecf3;
+  --text-2: #8492a6;
+  --accent: #3dd6c6;
+  --accent-dim: rgba(61, 214, 198, 0.12);
+  --up: #2ecc8a;
+  --down: #ff6577;
+  --warn: #f7c65d;
+  --up-bg: rgba(46, 204, 138, 0.12);
+  --down-bg: rgba(255, 101, 119, 0.12);
+  --warn-bg: rgba(247, 198, 93, 0.12);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --hover-layer: rgba(255, 255, 255, 0.03);
+  --input-bg: #0d1320;
+}
+
+[data-theme='light'] {
+  --bg: #f5f7fa;
+  --panel: #ffffff;
+  --card: #ffffff;
+  --border: #e2e8f0;
+  --text: #1a2332;
+  --text-2: #5b6b82;
+  --accent: #0d9488;
+  --accent-dim: rgba(13, 148, 136, 0.1);
+  --up: #1fa26a;
+  --down: #e23b4e;
+  --warn: #b45309;
+  --up-bg: rgba(31, 162, 106, 0.1);
+  --down-bg: rgba(226, 59, 78, 0.1);
+  --warn-bg: rgba(180, 83, 9, 0.1);
+  --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --hover-layer: rgba(15, 23, 42, 0.03);
+  --input-bg: #f8fafc;
+}

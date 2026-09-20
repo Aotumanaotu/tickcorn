@@ -13,10 +13,10 @@ from pathlib import Path
 import pytest
 
 from app.common.config import load_config
-from app.collector.live import LiveState
-from app.dashboard.control import CollectorManager, SettingsStore
-from app.dashboard.monitor_settings import MonitorSettingsStore, apply_payload
-from app.dashboard.server import DashboardServer
+from app.legacy.collector.live import LiveState
+from app.legacy.dashboard.control import CollectorManager, SettingsStore
+from app.legacy.dashboard.monitor_settings import MonitorSettingsStore, apply_payload
+from app.legacy.dashboard.server import DashboardServer
 from conftest import ROOT
 
 
@@ -28,7 +28,7 @@ def env(tmp_path: Path, monkeypatch):
         def register_front(self, address): pass
         def init(self): pass
         def release(self): pass
-    monkeypatch.setattr("app.collector.service.CtpMdClient", FakeClient)
+    monkeypatch.setattr("app.legacy.collector.service.CtpMdClient", FakeClient)
     config = load_config(config_dir=ROOT / "config", data_dir_override=tmp_path)
     manager = CollectorManager(config)
     return config, manager, tmp_path

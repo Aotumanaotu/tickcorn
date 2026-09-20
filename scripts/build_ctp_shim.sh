@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CTP_DIR="$ROOT/third_party/ctp/v6.7.13_linux64"
-NATIVE_DIR="$ROOT/src/app/collector/native"
+NATIVE_DIR="$ROOT/src/app/gateway/native"
 
 if [ ! -f "$CTP_DIR/lib/thostmduserapi_se.so" ]; then
     echo "ERROR: $CTP_DIR/lib/thostmduserapi_se.so not found." >&2

@@ -16,5 +16,5 @@ if [[ "${1:-}" == --check ]]; then
   echo 'Preflight passed. This does not validate a market account or SDK usage rights.'
   exit 0
 fi
-docker compose up -d --build --wait --wait-timeout 120
-echo 'Service ready. Use the SSH tunnel and token retrieval steps in docs/deployment.md.'
+docker compose up -d --build --wait --wait-timeout 180
+echo 'Deployed. Configure .env (admin bootstrap), then use the SSH tunnel steps in docs/deployment.md and log in at http://127.0.0.1:8800.'
