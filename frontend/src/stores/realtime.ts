@@ -60,6 +60,10 @@ export const useRealtimeStore = defineStore('realtime', () => {
     return quotes.value.get(instrumentId.toUpperCase()) ?? null
   }
 
+  function analysisFor(instrumentId: string): Envelope | null {
+    return analysis.value.get(instrumentId.toUpperCase()) ?? null
+  }
+
   function start(): void {
     stop()
     wsMarket.connect()
@@ -98,6 +102,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
     analysisState,
     microCount,
     quoteFor,
+    analysisFor,
     start,
     stop,
   }

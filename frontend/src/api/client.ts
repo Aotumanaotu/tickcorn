@@ -12,10 +12,13 @@ import type {
   ArchivePartition, ReportJob, MonitorSettings, MonitorWorker,
   Envelope,
   GatewayConnectPayload,
+  HistoryQuery,
   Instrument,
   InstrumentQuery,
+  MicroEventRow,
   Product,
   SystemStatus,
+  TickRow,
   TokenResponse,
   User,
   UserCreatePayload,
@@ -206,6 +209,18 @@ export const marketApi = {
     return request<Watchlist>(
       `/watchlists/${watchlistId}/items/${encodeURIComponent(instrumentId)}`,
       { method: 'DELETE' },
+    )
+  },
+
+  ticks(instrumentId: string, query: HistoryQuery = {}): Promise<TickRow[]> {
+    return request<TickRow[]>(
+      `/market/ticks${qs({ instrument_id: instrumentId, ...query })}`,
+    )
+  },
+
+  events(instrumentId: string, query: HistoryQuery = {}): Promise<MicroEventRow[]> {
+    return request<MicroEventRow[]>(
+      `/market/events${qs({ instrument_id: instrumentId, ...query })}`,
     )
   },
 }

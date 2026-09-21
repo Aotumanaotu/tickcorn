@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { stateLabel, modeLabel, percent } from '@/labels'
+import { stateLabel, modeLabel } from '@/labels'
 import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -8,19 +8,17 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import PageContainer from '@/components/layout/PageContainer.vue'
 import InstrumentName from '@/components/market/InstrumentName.vue'
 import PriceText from '@/components/market/PriceText.vue'
+import IntelligencePanel from '@/components/market/IntelligencePanel.vue'
 import { useInstrumentsStore } from '@/stores/instruments'
 import { useRealtimeStore } from '@/stores/realtime'
 import TickChart from '@/components/market/TickChart.vue'
 import MicroEvents from '@/components/market/MicroEvents.vue'
-import { useSystemStore } from '@/stores/system'
-import { wsMarket } from '@/ws/client'
+import { wsAnalysis, wsMarket } from '@/ws/client'
 
 const route = useRoute()
 const router = useRouter()
 const instruments = useInstrumentsStore()
 const realtime = useRealtimeStore()
-const system = useSystemStore()
-const metrics = computed(() => system.status?.realtime[instrumentId.value])
 
 const instrumentId = computed(() =>
   String(route.params.instrumentId ?? '').toUpperCase(),
@@ -28,8 +26,11 @@ const instrumentId = computed(() =>
 
 const quote = computed(() => realtime.quoteFor(instrumentId.value))
 const quoteData = computed(() => quote.value?.data ?? null)
+const tickSize = computed(
+  () => instruments.instrumentById.get(instrumentId.value)?.tick_size ?? null,
+)
 const decimals = computed(() => {
-  const tick = instruments.instrumentById.get(instrumentId.value)?.tick_size
+  const tick = tickSize.value
   if (tick && tick > 0) {
     const s = tick.toString()
     if (s.includes('.')) return s.split('.')[1].length
@@ -42,11 +43,15 @@ const dataMode = computed(() => quote.value?.dataMode ?? '')
 const feedState = computed(() => realtime.marketState)
 
 function subscribe(id: string): void {
-  if (id) wsMarket.subscribe(id)
+  if (!id) return
+  wsMarket.subscribe(id)
+  wsAnalysis.subscribe(id)
 }
 
 function unsubscribe(id: string): void {
-  if (id) wsMarket.unsubscribe(id)
+  if (!id) return
+  wsMarket.unsubscribe(id)
+  wsAnalysis.unsubscribe(id)
 }
 
 onMounted(() => {
@@ -152,12 +157,12 @@ function openInstrument(id: string): void {
 
       <div class="card panel main-panel">
         <div class="card-title"><span>行情图表</span></div>
-        <TickChart :instrument-id="instrumentId" />
+        <TickChart :instrument-id="instrumentId" :decimals="decimals" :tick-size="tickSize" />
       </div>
 
       <div class="card panel">
-        <div class="card-title"><span>分析面板</span></div>
-        <div class="card-body analysis-stats"><p>反弹占比：{{ percent(metrics?.bounce_ratio) }}</p><p>真实移动占比：{{ percent(metrics?.genuine_move_ratio) }}</p><p>1-tick 变化：{{ metrics?.one_tick_last_changes ?? '—' }}</p><p>快照 / 分钟：{{ metrics?.message_rate_per_min ?? '—' }}</p><p class="dim">最近 200 次转换的 1-tick 子集；完整统计请生成归档报告。</p></div>
+        <div class="card-title"><span>智能分析</span></div>
+        <IntelligencePanel :instrument-id="instrumentId" />
       </div>
     </div>
 
@@ -169,7 +174,6 @@ function openInstrument(id: string): void {
 </template>
 
 <style scoped>
-.analysis-stats p { margin-bottom: 12px; line-height: 1.6; }
 .market-header {
   display: flex;
   align-items: center;

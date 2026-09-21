@@ -3,7 +3,8 @@
 基于 CTP 行情的专业期货研究、微观结构分析与量化交易工作台。核心能力：行情采集 →
 Bid-Ask Bounce / True Move 分类 → 实时微观结构指标 → 研究报告 → 历史回放（Replay）。
 
-当前交付：**F0/F1 阶段**（新架构骨架 + 认证 + 实时行情链路 + 前端终端）。
+当前交付：**F0/F1/F2 阶段**（新架构骨架 + 认证 + 实时行情链路 + 前端终端 +
+Contract Workspace 完整版：LWC 实时图表 / 智能分析面板 / 事件时间轴）。
 Microstructure Lab（F3）、Reports（F4）、Replay（F5）、SimNow 交易与模型为后续阶段，
 架构已预留。
 
@@ -175,7 +176,7 @@ env -u PYTHONPATH .venv/bin/python -m app selftest
 |---|---|---|
 | F0 | 架构重组 / Gateway / 实时链路 / 前端终端 / 双主题 | ✅ |
 | F1 | JWT 认证 / RBAC / 用户与网关管理 | ✅ |
-| F2 | Contract Workspace 完整版（LWC 实时图 / Intelligence Panel / Timeline） | 进行中 |
+| F2 | Contract Workspace 完整版（LWC 实时图 / Intelligence Panel / Timeline） | ✅ |
 | F3 | Microstructure Lab（事件钻取 / 分类依据可视化） | 规划 |
 | F4 | Research Reports（结构化报告 / 对比 / 导出） | 规划 |
 | F5 | Replay（会话回放 / 变速 / 跳转） | 规划 |

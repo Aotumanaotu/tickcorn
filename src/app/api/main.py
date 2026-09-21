@@ -21,6 +21,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException
+from starlette.responses import Response
 
 from app import __version__
 from app.analysis.realtime import RealtimeMetrics
@@ -60,6 +62,27 @@ _SECURITY_HEADERS = {
 }
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+
+
+class _SpaStaticFiles(StaticFiles):
+    """StaticFiles with SPA history fallback.
+
+    Unknown GET paths (client-side routes like /workspace/C2611) serve
+    index.html so deep links and refreshes work behind the reverse proxy;
+    /api/* and /ws/* keep their native 404s.
+    """
+
+    async def get_response(self, path: str, scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except HTTPException as exc:
+            if (
+                exc.status_code == 404
+                and scope.get("method") == "GET"
+                and not path.startswith(("api/", "ws/"))
+            ):
+                return await super().get_response("index.html", scope)
+            raise
 
 
 def create_app(config: Optional[AppConfig] = None,
@@ -176,7 +199,7 @@ def create_app(config: Optional[AppConfig] = None,
     app.include_router(ws_routes.router)
 
     if _FRONTEND_DIST.is_dir():
-        app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True),
+        app.mount("/", _SpaStaticFiles(directory=str(_FRONTEND_DIST), html=True),
                   name="frontend")
     else:
         @app.get("/")

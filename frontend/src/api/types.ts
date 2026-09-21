@@ -161,6 +161,70 @@ export interface WsTicket {
   expires_in: number
 }
 
+// ---------------------------------------------------------------------------
+// Historical market data (GET /market/ticks, /market/events)
+// ---------------------------------------------------------------------------
+
+export interface TickRow {
+  id: number
+  instrument_id: string
+  ts: string | null
+  exchange_ts_ns: number | null
+  local_ts_ns: number | null
+  seq: number | null
+  last: number | null
+  bid1: number | null
+  ask1: number | null
+  bid_volume1: number | null
+  ask_volume1: number | null
+  volume: number | null
+  spread: number | null
+  spread_ticks: number | null
+  mid: number | null
+  obi1: number | null
+  source: string | null
+  data_mode: string | null
+  [key: string]: unknown
+}
+
+export interface MicroEventRow {
+  id: number
+  instrument_id: string | null
+  ts: string | null
+  exchange_ts_ns: number | null
+  local_ts_ns: number | null
+  seq: number | null
+  label: string | null
+  family: string | null
+  state5: string | null
+  direction: number | null
+  reason: string | null
+  direction_hint: number | null
+  db_ticks: number | null
+  da_ticks: number | null
+  dl_ticks: number | null
+  dm_ticks: number | null
+  spread_prev_ticks: number | null
+  spread_cur_ticks: number | null
+  source: string | null
+  data_mode: string | null
+}
+
+export interface HistoryQuery {
+  from_ns?: string
+  to_ns?: string
+  label?: string
+  limit?: number
+  offset?: number
+}
+
+/** /ws/analysis envelope payload: rolling metrics + regime. */
+export interface AnalysisData {
+  metrics: RealtimeMetrics
+  regime: string
+  label: string
+}
+
 export interface RealtimeMetrics {
   bounce_ratio: number | null
   genuine_move_ratio: number | null

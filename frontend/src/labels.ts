@@ -52,3 +52,19 @@ const eventLabels: Record<string, string> = {
 }
 export const eventLabel = (value: unknown): string => eventLabels[String(value)] ?? String(value ?? '—')
 export const percent = (value: number | null | undefined): string => value == null ? '—' : `${(value * 100).toFixed(1)}%`
+
+const regimeLabels: Record<string, string> = {
+  INSUFFICIENT_DATA: '数据不足',
+  HIGH_BOUNCE: '高反弹市况',
+  DIRECTIONAL: '趋势市况',
+  MIXED: '混合市况',
+}
+export const regimeLabel = (value: unknown): string => regimeLabels[String(value)] ?? (value ? String(value) : '—')
+export type RegimeTone = 'up' | 'warn' | 'info' | 'muted'
+const regimeTones: Record<string, RegimeTone> = {
+  HIGH_BOUNCE: 'warn',
+  DIRECTIONAL: 'up',
+  MIXED: 'info',
+  INSUFFICIENT_DATA: 'muted',
+}
+export const regimeTone = (value: unknown): RegimeTone => regimeTones[String(value)] ?? 'muted'

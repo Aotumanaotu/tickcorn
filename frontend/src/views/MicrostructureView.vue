@@ -15,6 +15,15 @@ const options = computed(() => [...new Set([...Object.keys(system.gateway?.instr
 watch(options, ids => { if (!selected.value && ids.length) selected.value = ids[0] }, { immediate: true })
 watch(selected, (next, prev) => { if (prev) wsMarket.unsubscribe(prev); if (next) wsMarket.subscribe(next) }, { immediate: true })
 const metrics = computed(() => system.status?.realtime[selected.value])
+const tickSize = computed(() => instruments.instrumentById.get(selected.value)?.tick_size ?? null)
+const decimals = computed(() => {
+  const tick = tickSize.value
+  if (tick && tick > 0) {
+    const s = tick.toString()
+    return s.includes('.') ? s.split('.')[1].length : 0
+  }
+  return 1
+})
 onMounted(() => { void instruments.init(); void system.refreshStatus(true) })
 onUnmounted(() => { if (selected.value) wsMarket.unsubscribe(selected.value) })
 </script>
@@ -23,7 +32,7 @@ onUnmounted(() => { if (selected.value) wsMarket.unsubscribe(selected.value) })
     <template #actions><select v-model="selected" class="select" aria-label="分析合约"><option value="" disabled>请选择合约</option><option v-for="id in options" :key="id" :value="id">{{ id }}</option></select></template>
     <p class="scope">实时统计以 API 本次运行为范围；比例的分子与分母均限定为最近 200 次转换中，最新价变化恰好为 1 tick 的子集。历史全天分析请使用“数据与报告”。</p>
     <div class="metrics"><MetricCard label="反弹占比" :value="percent(metrics?.bounce_ratio)" /><MetricCard label="真实移动占比" :value="percent(metrics?.genuine_move_ratio)" /><MetricCard label="窗口内 1-tick 变化" :value="metrics?.one_tick_last_changes ?? '—'" /><MetricCard label="快照 / 分钟" :value="metrics?.message_rate_per_min ?? '—'" /></div>
-    <div class="card"><div class="card-title">价格与买卖报价 · {{ selected || '待选择' }}</div><TickChart :instrument-id="selected" /></div>
+    <div class="card"><div class="card-title">价格与买卖报价 · {{ selected || '待选择' }}</div><TickChart :instrument-id="selected" :decimals="decimals" :tick-size="tickSize" /></div>
     <div class="card"><div class="card-title">实时事件分类 · 最近 60 条</div><MicroEvents :instrument-id="selected" /></div>
   </PageContainer>
 </template>
